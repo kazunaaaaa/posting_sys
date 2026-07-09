@@ -49,11 +49,22 @@ APIキーが未設定でも動作します。**町丁目モード（松戸市サ
 | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | 最適エリアのAI解説（Claude API） | ルールベース解説 |
 | `PRICING_DATA_PATH` | 配布会社 原価・見積データのパス | 同梱サンプル |
 
-### e-Stat（世帯数）の接続手順
-1. [e-Stat API](https://www.e-stat.go.jp/api/) でアプリケーションID(appId)を取得し `ESTAT_APP_ID` に設定
-2. 市区町村別世帯数の統計表ID（国勢調査 or 住基）を `ESTAT_STATS_DATA_ID` に設定
-3. サーバーが `getStatsData` の `VALUE[@area]`（市区町村コード）→世帯数を読み、部数=世帯数×70%を算出（`server/services/estat.js`）
-4. 町丁目（小地域）を実データ化する場合は、境界（e-Stat統計GIS）と世帯数を KEY_CODE で結合
+### e-Stat（世帯数）の接続手順と疎通確認
+1. [e-Stat API](https://www.e-stat.go.jp/api/) でアプリケーションID(appId)を取得し `.env` の `ESTAT_APP_ID` に設定
+2. **疎通確認スクリプトを実行**（statsDataId未設定なら候補を検索表示）:
+   ```bash
+   npm --prefix server run estat:check
+   ```
+3. 表示された候補から市区町村別世帯数の表を選び `ESTAT_STATS_DATA_ID` に設定して再実行。
+   スクリプトが「接続 → メタ検出（世帯数分類の自動判定）→ 世帯数取得 → 全国マスタとの結合率」を検証し、
+   松戸市などサンプル自治体の `世帯数 → 配布部数(×70%)` とPASS/FAILを表示します。
+4. PASSしたら `server` を再起動すると、市区町村モードで**真値の配布部数**が表示されます。
+5. 自動検出が合わない表では `ESTAT_HOUSEHOLD_CLASS` / `ESTAT_HOUSEHOLD_CODE` / `ESTAT_TIME_CODE` で明示できます。
+
+> 実装は `server/services/estatClient.js`（getStatsList/getMetaInfo/getStatsData）。世帯数分類の検出・
+> `@area`→市区町村コードの結合・全国/都道府県の除外・最新年フィルタを行います。パースは
+> `npm --prefix server test`（`server/test/estatClient.test.mjs`, モック16項目）で検証済み。
+> 町丁目（小地域）を実データ化する場合は、境界（e-Stat統計GIS）と世帯数を KEY_CODE で結合します。
 
 ## アーキテクチャ
 

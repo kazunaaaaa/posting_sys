@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { centroid, areaKm2 } from './geo.js';
+import { fetchMunicipalityHouseholds } from './estatClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -135,22 +136,13 @@ async function fillHouseholds(codes) {
 }
 
 // e-Stat getStatsData から 市区町村別世帯数を取得し { code: households } を返す。
-// 統計表の分類ID構成に依存するため、実データIDに合わせて area コード/世帯数カテゴリを調整する。
+// 分類ID/世帯数コード/時間軸は estatClient が自動検出し、環境変数で上書きできる。
 async function fetchEstatHouseholds(appId, statsDataId) {
-  const url = new URL('https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData');
-  url.searchParams.set('appId', appId);
-  url.searchParams.set('statsDataId', statsDataId);
-  url.searchParams.set('limit', '100000');
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`e-Stat ${res.status}`);
-  const json = await res.json();
-  const values = json?.GET_STATS_DATA?.STATISTICAL_DATA?.DATA_INF?.VALUE ?? [];
-  const out = {};
-  for (const v of values) {
-    // @area が市区町村コード、$ が値。世帯数カテゴリの絞り込みは統計表に応じて追加する。
-    const code = v['@area'];
-    const val = Number(v['$']);
-    if (code && Number.isFinite(val)) out[code] = val;
-  }
-  return out;
+  const { households, meta } = await fetchMunicipalityHouseholds(appId, statsDataId, {
+    householdClassId: process.env.ESTAT_HOUSEHOLD_CLASS,   // 例: tab / cat01
+    householdCode: process.env.ESTAT_HOUSEHOLD_CODE,       // 世帯数の分類コード
+    timeCode: process.env.ESTAT_TIME_CODE,                 // 時間軸コード（未指定は最新）
+  });
+  console.log(`[estat] 世帯数取得: ${meta.municipalityCount}市区町村 (世帯分類=${meta.household.name}, 時間=${meta.timeCode})`);
+  return households;
 }

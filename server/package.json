@@ -6,7 +6,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "node --watch index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "estat:check": "node scripts/estat-check.mjs",
+    "test": "node test/estatClient.test.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
