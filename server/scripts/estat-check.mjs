@@ -9,7 +9,7 @@
 //      → メタ検出・世帯数取得・マスタ結合まで検証しPASS/FAILを表示
 //
 // 任意の上書き: ESTAT_HOUSEHOLD_CLASS / ESTAT_HOUSEHOLD_CODE / ESTAT_TIME_CODE
-import 'dotenv/config';
+import '../loadEnv.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -59,7 +59,14 @@ async function main() {
     console.log(c.ok(`✓ 接続成功。候補統計表 ${tables.length} 件`));
   } catch (e) {
     console.log(c.ng(`✗ 接続失敗: ${e.message}`));
-    console.log('  appId の誤り、またはネットワーク制限の可能性があります。\n');
+    if (/HTTP 403|HTTP 407|CONNECT/.test(e.message)) {
+      console.log('  → トランスポート層の遮断です。実行環境からe-Statへ接続できません');
+      console.log('    （プロキシ/ファイアウォールが api.e-stat.go.jp を許可していない）。');
+      console.log('    ネットワーク制限のない環境で実行してください。appIdの問題ではありません。');
+    } else {
+      console.log('  appId の誤り、またはネットワーク制限の可能性があります。');
+    }
+    console.log('');
     process.exit(1);
   }
 
