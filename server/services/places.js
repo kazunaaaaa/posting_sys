@@ -23,14 +23,27 @@ export function getBusinessType(id) {
   return businessTypes().find((t) => t.id === id);
 }
 
+function areaCenter(a) {
+  return a.center ?? (a.polygon ? centroid(a.polygon) : { lat: a.lat, lng: a.lng });
+}
+
 function unionBbox(areas) {
   let b = { minLng: Infinity, minLat: Infinity, maxLng: -Infinity, maxLat: -Infinity };
   for (const a of areas) {
-    const bb = bbox(a.polygon);
-    b.minLng = Math.min(b.minLng, bb.minLng);
-    b.minLat = Math.min(b.minLat, bb.minLat);
-    b.maxLng = Math.max(b.maxLng, bb.maxLng);
-    b.maxLat = Math.max(b.maxLat, bb.maxLat);
+    if (a.polygon) {
+      const bb = bbox(a.polygon);
+      b.minLng = Math.min(b.minLng, bb.minLng);
+      b.minLat = Math.min(b.minLat, bb.minLat);
+      b.maxLng = Math.max(b.maxLng, bb.maxLng);
+      b.maxLat = Math.max(b.maxLat, bb.maxLat);
+    } else {
+      const c = areaCenter(a);
+      // 重心のみの場合は約3km四方を仮定
+      b.minLng = Math.min(b.minLng, c.lng - 0.03);
+      b.minLat = Math.min(b.minLat, c.lat - 0.02);
+      b.maxLng = Math.max(b.maxLng, c.lng + 0.03);
+      b.maxLat = Math.max(b.maxLat, c.lat + 0.02);
+    }
   }
   return b;
 }
@@ -126,7 +139,7 @@ function sampleCompetitors(bt, areas) {
   const out = [];
   const seedBase = bt.id.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
   for (const a of areas) {
-    const c = centroid(a.polygon);
+    const c = areaCenter(a);
     const density = a.households || 3000;
     const count = Math.max(1, Math.round((density / 3000) * (2 + (seedBase % 3))));
     for (let i = 0; i < count; i++) {

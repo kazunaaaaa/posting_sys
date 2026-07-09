@@ -61,6 +61,37 @@ export function areaKm2(polygon) {
   return Math.abs(area / 2) / 1e6;
 }
 
+// Douglas-Peucker ポリゴン簡略化（境界の点数を削減してキャッシュを軽くする）
+function perpDistance(p, a, b) {
+  const [px, py] = p, [ax, ay] = a, [bx, by] = b;
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+export function simplifyRing(ring, tolerance = 0.0002) {
+  if (ring.length <= 4) return ring;
+  const keep = new Array(ring.length).fill(false);
+  keep[0] = keep[ring.length - 1] = true;
+  const stack = [[0, ring.length - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop();
+    let maxD = 0, idx = -1;
+    for (let i = s + 1; i < e; i++) {
+      const d = perpDistance(ring[i], ring[s], ring[e]);
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > tolerance && idx !== -1) {
+      keep[idx] = true;
+      stack.push([s, idx], [idx, e]);
+    }
+  }
+  const out = ring.filter((_, i) => keep[i]);
+  return out.length >= 4 ? out : ring;
+}
+
 // バウンディングボックス
 export function bbox(polygon) {
   let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;

@@ -5,3 +5,6 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# 境界データのオンデマンド取得キャッシュ（実行時生成）
+server/data/boundaries/*.json

@@ -53,6 +53,25 @@ body {
 .kv.strong { font-size: 16px; font-weight: 800; color: var(--pink); border-top: 1px dashed var(--line); padding-top: 8px; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
+.modetabs { display: flex; gap: 6px; padding: 12px 16px 0; }
+.modetabs button {
+  flex: 1; padding: 9px 6px; border: 1px solid var(--line); background: #fff;
+  border-radius: 8px; font-size: 12.5px; font-weight: 700; cursor: pointer; color: var(--muted);
+}
+.modetabs button.on { background: var(--pink); color: #fff; border-color: var(--pink); }
+
+.search { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
+.munilist { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.municheck {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px;
+  border-bottom: 1px solid #f1f2f4; cursor: pointer;
+}
+.municheck:hover { background: #fafafa; }
+.municheck span { flex: 1; }
+.municheck em { font-style: normal; color: var(--muted); font-size: 12px; }
+.codot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+.mapempty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 14px; }
+
 .mapwrap { display: flex; flex-direction: column; min-height: 0; }
 .maptoolbar {
   display: flex; align-items: center; gap: 10px; padding: 8px 12px;

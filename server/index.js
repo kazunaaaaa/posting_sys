@@ -4,8 +4,10 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import areasRouter from './routes/areas.js';
+import municipalitiesRouter from './routes/municipalities.js';
 import competitorsRouter from './routes/competitors.js';
 import analyzeRouter from './routes/analyze.js';
+import pricingRouter from './routes/pricing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -25,8 +27,10 @@ app.get('/api/config', (req, res) => {
 });
 
 app.use('/api/areas', areasRouter);
+app.use('/api/municipalities', municipalitiesRouter);
 app.use('/api/competitors', competitorsRouter);
 app.use('/api/analyze', analyzeRouter);
+app.use('/api/pricing', pricingRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

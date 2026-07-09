@@ -3,8 +3,13 @@
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
 function ruleBasedExplanation(scoring, businessTypeLabel) {
-  const { best, areas, totals } = scoring;
-  if (!best) return '対象エリアが選択されていません。';
+  const { best, areas, totals, skipped } = scoring;
+  if (!best) {
+    if (skipped?.length) {
+      return `選択エリアの世帯数が未取得のため分析できません（${skipped.map((s) => s.name).join('、')}）。e-Stat連携（ESTAT_APP_ID / ESTAT_STATS_DATA_ID）を設定するか、町丁目サンプルでお試しください。`;
+    }
+    return '対象エリアが選択されていません。';
+  }
   const top3 = areas.slice(0, 3);
   const lines = [];
   lines.push(

@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "note": "配布会社ごとの配布原価・見積単価(円/部)のサンプル。徐々に実データをプロットしていくための土台。area は市区町村コードまたは町丁目コード。未登録エリアは company.defaultRate を使用。",
+    "currency": "JPY"
+  },
+  "companies": [
+    {
+      "id": "co_alpha",
+      "name": "アルファ配布",
+      "color": "#0ea5e9",
+      "defaultRate": 5.8,
+      "quoteMarkup": 1.35,
+      "coverage": ["12"],
+      "rates": {
+        "12207": { "cost": 5.2, "quote": 6.9 },
+        "12207010001": { "cost": 5.0, "quote": 6.6 },
+        "12207010005": { "cost": 5.1, "quote": 6.7 }
+      }
+    },
+    {
+      "id": "co_bravo",
+      "name": "ブラボー・ポスティング",
+      "color": "#f97316",
+      "defaultRate": 6.2,
+      "quoteMarkup": 1.3,
+      "coverage": ["12", "13"],
+      "rates": {
+        "12207": { "cost": 4.9, "quote": 6.3 },
+        "12207010002": { "cost": 4.8, "quote": 6.1 }
+      }
+    },
+    {
+      "id": "co_charlie",
+      "name": "チャーリー宅配",
+      "color": "#22c55e",
+      "defaultRate": 5.5,
+      "quoteMarkup": 1.4,
+      "coverage": ["11", "12", "13", "14"],
+      "rates": {
+        "12207": { "cost": 5.4, "quote": 7.1 }
+      }
+    }
+  ]
+}

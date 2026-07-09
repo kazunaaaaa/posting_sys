@@ -1,110 +1,109 @@
 # ポスティング配布エリア選択システム
 
-ラクスルの「地図から簡単注文」のように、**地図上でポスティング配布エリアを選び、配布部数を自動算出**するWebアプリのMVPです。さらに以下を備えています。
+ラクスルの「地図から簡単注文」のように、**地図上でポスティング配布エリアを選び、配布部数を自動算出**するWebアプリのMVPです。カート/注文機能は持たず、**配布部数の算出とAIによる最適エリア分析に特化**しています。
 
-- 📮 **配布部数の自動算出** … 各エリアの最新世帯数（国勢調査／住民基本台帳）に対して **70%** を配布部数とする
+- 🗾 **全国自治体対応** … 47都道府県・全1,916市区町村から選択。境界ポリゴンはオンデマンド取得＋キャッシュ
+- 🏘️ **町丁目（小地域）配布** … より細かい町丁目単位でも選択可能（松戸市サンプル同梱／e-Stat小地域に差し替え可）
+- 📮 **配布部数の自動算出** … 各エリアの世帯数（国勢調査／住民基本台帳）に対して **70%** を配布部数とする
 - 🔍 **競合分析** … 業態を選ぶと、その業態の競合が地図上にプロットされる
 - 🤖 **AIによる最適エリア分析** … 世帯規模・競合密度・配布効率・コストをスコア化し、最適エリアをAIが提案・解説
+- 🚚 **配布会社の原価・見積** … 選択エリアの各配布会社の原価/見積単価を集計（実データを徐々にプロットしていく土台）
 
-![screenshot](docs/screenshot.png)
+| 町丁目 配布 | 市区町村 配布（全国） |
+|---|---|
+| ![town](docs/screenshot.png) | ![municipality](docs/screenshot-municipality.png) |
 
 ## クイックスタート
 
 ```bash
-# 依存関係のインストール（ルート / server / client）
-npm run install:all
-
-# 開発モード（server: 4000, client: 5173）
-npm run dev
-# → http://localhost:5173 を開く
+npm run install:all          # ルート / server / client の依存をインストール
+npm run dev                  # server:4000, client:5173（→ http://localhost:5173）
 
 # 本番ビルド＋単一サーバー起動（http://localhost:4000）
-npm run build
-npm start
+npm run build && npm start
 ```
 
-APIキーが未設定でも**そのまま動作**します（松戸市周辺のサンプル世帯数、競合はサンプル生成、AI解説はルールベース）。地図はGoogle Mapsキーが無い場合、内蔵のSVGデモ地図にフォールバックします。
+APIキーが未設定でも動作します。**町丁目モード（松戸市サンプル）は部数算出〜AI分析〜見積までフルに動作**します。
+
+## データの実データ性と充填元
+
+| データ | この状態での挙動 | 実データ源（実運用） |
+|--------|------------------|----------------------|
+| 全国市区町村マスタ（コード・名称・重心） | ✅ 実データ同梱（1,916件） | [localgovjp](https://github.com/code4fukui/localgovjp) |
+| 市区町村の**世帯数** | ⚠️ 未接続時は `null`（部数は「—」表示）。**捏造値は入れていません** | **e-Stat API**（国勢調査／住基）|
+| 市区町村の**境界ポリゴン** | ✅ 選択時にオンデマンド取得＋キャッシュ | **e-Stat 統計GIS 境界データ**（推奨）／[niiyz/JapanCityGeoJson](https://github.com/niiyz/JapanCityGeoJson)（キー不要フォールバック）|
+| 町丁目（松戸市）世帯数・境界 | ✅ サンプル同梱で動作 | e-Stat 小地域（世帯数＋境界データ）|
+| 競合POI | ✅ サンプル生成／実POI取得 | Google Places API →（キー無ければ）OpenStreetMap Overpass |
+| 配布会社 原価・見積 | ✅ サンプル同梱 | 各社と連携して蓄積（`server/data/pricing.sample.json`）|
+
+> **世帯数について**: 「配布部数＝最新世帯数×70%」の**世帯数の正データはe-Stat**です。本リポジトリのビルド環境ではe-Statへ到達できないため、市区町村の世帯数は未接続時 `null`（誤った推計値は表示しない方針）。`ESTAT_APP_ID` を設定すると全国の部数が真値で算出されます。町丁目サンプル（松戸市）はデモ用に世帯数を同梱しています。
 
 ## 環境変数（`.env.example` を `.env` にコピー）
 
-| 変数 | 用途 | 未設定時の挙動 |
-|------|------|----------------|
+| 変数 | 用途 | 未設定時 |
+|------|------|----------|
 | `GOOGLE_MAPS_API_KEY` | 地図表示（Maps JavaScript API） | SVGデモ地図で描画 |
-| `GOOGLE_PLACES_API_KEY` | 競合POI検索（Places API New） | OpenStreetMap Overpass → サンプルの順でフォールバック |
-| `ESTAT_APP_ID` | 世帯数の実データ取得（e-Stat API） | 同梱サンプル世帯数を使用 |
-| `ANTHROPIC_API_KEY` | 最適エリアのAI解説（Claude API） | ルールベース解説を使用 |
-| `CLAUDE_MODEL` | 使用モデル | `claude-opus-4-8` |
+| `GOOGLE_PLACES_API_KEY` | 競合POI検索（Places API New） | Overpass → サンプルにフォールバック |
+| `ESTAT_APP_ID` / `ESTAT_STATS_DATA_ID` | 世帯数の実データ（e-Stat getStatsData） | 世帯数は取得せず `null` |
+| `BOUNDARY_BASE` | 境界GeoJSONの取得元ベースURL | niiyz raw GitHub |
+| `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | 最適エリアのAI解説（Claude API） | ルールベース解説 |
+| `PRICING_DATA_PATH` | 配布会社 原価・見積データのパス | 同梱サンプル |
 
-### Google Maps / Places キーの取得
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
-2. **Maps JavaScript API** と **Places API (New)** を有効化
-3. 認証情報 > APIキーを作成。地図用キーはHTTPリファラ制限、Places用キーはIP制限を推奨
-
-### e-Stat（世帯数の実データ）
-1. [e-Stat API](https://www.e-stat.go.jp/api/) でアプリケーションID(appId)を取得
-2. `.env` に `ESTAT_APP_ID` と、世帯数の統計表ID `ESTAT_STATS_DATA_ID`（国勢調査 小地域 世帯数）を設定
-3. 地図描画には小地域の**境界ポリゴン**が必要です。e-Stat の[統計GIS 境界データ](https://www.e-stat.go.jp/gis)（shapefile/GeoJSON）を小地域コードで結合してください（`server/services/estat.js` にフックあり）
+### e-Stat（世帯数）の接続手順
+1. [e-Stat API](https://www.e-stat.go.jp/api/) でアプリケーションID(appId)を取得し `ESTAT_APP_ID` に設定
+2. 市区町村別世帯数の統計表ID（国勢調査 or 住基）を `ESTAT_STATS_DATA_ID` に設定
+3. サーバーが `getStatsData` の `VALUE[@area]`（市区町村コード）→世帯数を読み、部数=世帯数×70%を算出（`server/services/estat.js`）
+4. 町丁目（小地域）を実データ化する場合は、境界（e-Stat統計GIS）と世帯数を KEY_CODE で結合
 
 ## アーキテクチャ
 
 ```
-posting_sys/
-├── server/                 Node.js + Express API
-│   ├── index.js            エントリ / /api/config でフロントへ設定公開
-│   ├── routes/
-│   │   ├── areas.js        GET /api/areas 世帯数・配布部数、POST /summary
-│   │   ├── competitors.js  業態マスタ、POST /search 競合検索
-│   │   └── analyze.js      POST /api/analyze 最適エリア分析
-│   ├── services/
-│   │   ├── estat.js        世帯数（e-Stat連携 or サンプル）＋ 配布率70%
-│   │   ├── places.js       競合検索（Google Places → Overpass → サンプル）
-│   │   ├── scoring.js      最適エリア スコアリングエンジン
-│   │   ├── claude.js       Claude API 解説（or ルールベース）
-│   │   └── geo.js          ポリゴン内包判定・面積・重心・距離
-│   └── data/
-│       ├── households.sample.json   松戸市周辺の町丁目サンプル
-│       └── business-types.json      業態マスタ（Google/Overpassマッピング付き）
-└── client/                 React + Vite
-    └── src/
-        ├── App.jsx                  画面全体・状態管理
-        ├── components/
-        │   ├── GoogleMapView.jsx    Google Maps 描画
-        │   └── SvgMapView.jsx       キー未設定時のSVGフォールバック地図
-        └── lib/{api,googleMaps}.js  APIクライアント / Mapsローダ
+server/                     Node.js + Express API
+├── routes/
+│   ├── areas.js            /api/areas         町丁目エリア（世帯数・部数・ポリゴン）
+│   ├── municipalities.js   /api/municipalities 全国自治体一覧・都道府県・境界オンデマンド
+│   ├── competitors.js      /api/competitors   業態マスタ・競合検索
+│   ├── analyze.js          /api/analyze       最適エリア分析（スコア+見積+AI解説）
+│   └── pricing.js          /api/pricing       配布会社一覧・見積
+├── services/
+│   ├── estat.js            世帯数（e-Stat充填 or サンプル）＋ 配布率70%
+│   ├── boundaries.js       境界のオンデマンド取得・簡略化・キャッシュ
+│   ├── areas.js            コード+粒度 → エリア解決（境界結合）
+│   ├── places.js           競合検索（Google → Overpass → サンプル）
+│   ├── scoring.js          4軸スコアリング（世帯数nullは対象外）
+│   ├── pricing.js          配布会社 原価・見積
+│   ├── claude.js           Claude API 解説（or ルールベース）
+│   └── geo.js              内包判定・面積・重心・距離・簡略化(DP)
+└── data/
+    ├── municipalities.json      全国市区町村マスタ（実データ）
+    ├── households.sample.json   松戸市 町丁目サンプル
+    ├── business-types.json      業態マスタ
+    ├── pricing.sample.json      配布会社 原価・見積サンプル
+    └── boundaries/              取得済み境界のキャッシュ
+
+client/                     React + Vite
+└── src/
+    ├── App.jsx                  2モード（町丁目 / 市区町村）状態管理
+    ├── components/
+    │   ├── GoogleMapView.jsx    Google Maps（ポリゴン+候補点+競合）
+    │   └── SvgMapView.jsx       キー未設定時のSVGフォールバック地図
+    └── lib/{api,googleMaps}.js
 ```
 
-## APIエンドポイント
-
-| メソッド | パス | 説明 |
-|----------|------|------|
-| GET | `/api/config` | フロント公開設定（Mapsキー等） |
-| GET | `/api/areas` | 全エリア（世帯数・配布部数=世帯数×70%・重心・面積） |
-| POST | `/api/areas/summary` | 選択エリアの配布サマリ `{ codes: [] }` |
-| GET | `/api/competitors/business-types` | 業態マスタ |
-| POST | `/api/competitors/search` | 競合検索 `{ businessTypeId, codes: [] }` |
-| POST | `/api/analyze` | 最適エリア分析 `{ codes: [], businessTypeId, unitCost? }` |
-
-## スコアリングの考え方
-
-各エリアを4軸で0–100に正規化し、重み付けして総合スコアを算出します（`server/services/scoring.js`）。
+## スコアリングの考え方（`server/services/scoring.js`）
 
 | 軸 | 指標 | 重み |
 |----|------|------|
 | 到達 (reach) | 世帯数（配布到達数） | 35% |
-| 競合機会 (opportunity) | 世帯数 ÷ (競合数+1) が大きいほど良い | 30% |
+| 競合機会 (opportunity) | 世帯数 ÷ (競合数+1) | 30% |
 | 配布効率 (efficiency) | 世帯密度 | 20% |
-| コスト効率 (cost) | 到達世帯 ÷ 配布コスト | 15% |
+| コスト効率 (cost) | 到達世帯 ÷ 配布コスト（配布会社の最安見積単価を反映） | 15% |
 
-競合は各エリアのポリゴン内包判定（＋近傍800m）で割り当てます。`ANTHROPIC_API_KEY` を設定すると、このスコアリング結果をもとにClaudeが最適エリアの理由・優先度・予算配分を日本語で解説します。
+各軸を0–100に正規化し重み付け。世帯数が未取得のエリアは対象外（`skipped`）として明示します。`ANTHROPIC_API_KEY` を設定するとClaudeが最適エリアの理由・優先度・予算配分を日本語で解説します。
 
-## 実データへの差し替えポイント
+## 今後の拡張
 
-- **世帯数** → `server/services/estat.js` の `fetchFromEstat()`（e-Stat数値取得 ＋ 境界データ結合）
-- **競合** → `server/services/places.js` の `fromGooglePlaces()` / `fromOverpass()`
-- **エリア（境界）** → `server/data/households.sample.json` を e-Stat 境界データ由来のGeoJSONに置換
-
-## 今後の拡張候補
-
-- 対象自治体の全国展開（境界データの動的ロード）
-- 配布日・在庫を考慮した部数最適化、カート/注文フロー
+- **配布会社の原価・見積を徐々にプロット** … `pricing.sample.json` を各社実データに差し替え／エリア別単価を蓄積（データモデルは実装済み）
+- e-Stat 小地域境界を用いた全国の町丁目配布
 - 競合の口コミ評価を加味したスコアリング、商圏（到達圏）解析
+```
