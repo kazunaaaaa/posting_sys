@@ -1,0 +1,76 @@
+{
+  "categories": [
+    {
+      "id": "beauty_salon",
+      "label": "美容室・ヘアサロン",
+      "icon": "💇",
+      "googlePlacesTypes": ["hair_care", "beauty_salon"],
+      "overpass": [{ "key": "shop", "value": "hairdresser" }, { "key": "shop", "value": "beauty" }],
+      "keyword": "美容室"
+    },
+    {
+      "id": "restaurant",
+      "label": "飲食店",
+      "icon": "🍽️",
+      "googlePlacesTypes": ["restaurant"],
+      "overpass": [{ "key": "amenity", "value": "restaurant" }],
+      "keyword": "レストラン"
+    },
+    {
+      "id": "cafe",
+      "label": "カフェ",
+      "icon": "☕",
+      "googlePlacesTypes": ["cafe"],
+      "overpass": [{ "key": "amenity", "value": "cafe" }],
+      "keyword": "カフェ"
+    },
+    {
+      "id": "clinic",
+      "label": "クリニック・医院",
+      "icon": "🏥",
+      "googlePlacesTypes": ["doctor", "hospital"],
+      "overpass": [{ "key": "amenity", "value": "clinic" }, { "key": "amenity", "value": "doctors" }],
+      "keyword": "クリニック"
+    },
+    {
+      "id": "dental",
+      "label": "歯科医院",
+      "icon": "🦷",
+      "googlePlacesTypes": ["dentist"],
+      "overpass": [{ "key": "amenity", "value": "dentist" }],
+      "keyword": "歯科"
+    },
+    {
+      "id": "fitness",
+      "label": "ジム・フィットネス",
+      "icon": "🏋️",
+      "googlePlacesTypes": ["gym"],
+      "overpass": [{ "key": "leisure", "value": "fitness_centre" }],
+      "keyword": "フィットネスジム"
+    },
+    {
+      "id": "cram_school",
+      "label": "学習塾・スクール",
+      "icon": "📚",
+      "googlePlacesTypes": ["school"],
+      "overpass": [{ "key": "amenity", "value": "school" }],
+      "keyword": "学習塾"
+    },
+    {
+      "id": "convenience",
+      "label": "コンビニ・小売",
+      "icon": "🏪",
+      "googlePlacesTypes": ["convenience_store", "supermarket"],
+      "overpass": [{ "key": "shop", "value": "convenience" }, { "key": "shop", "value": "supermarket" }],
+      "keyword": "コンビニ"
+    },
+    {
+      "id": "real_estate",
+      "label": "不動産",
+      "icon": "🏠",
+      "googlePlacesTypes": ["real_estate_agency"],
+      "overpass": [{ "key": "office", "value": "estate_agent" }],
+      "keyword": "不動産"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+* { box-sizing: border-box; }
+:root {
+  --pink: #e5007e;
+  --ink: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --bg: #f7f8fa;
+}
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+.app { display: flex; flex-direction: column; height: 100%; }
+
+.topbar {
+  display: flex; align-items: baseline; gap: 16px;
+  padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--line);
+}
+.logo { font-size: 18px; font-weight: 800; color: var(--pink); }
+.tagline { font-size: 12px; color: var(--muted); }
+
+.layout {
+  flex: 1; display: grid;
+  grid-template-columns: 300px 1fr 320px;
+  min-height: 0;
+}
+.panel { overflow-y: auto; background: #fff; }
+.panel.left { border-right: 1px solid var(--line); }
+.panel.right { border-left: 1px solid var(--line); }
+
+.section { padding: 16px; border-bottom: 1px solid var(--line); }
+.section h3 { margin: 0 0 12px; font-size: 13px; color: var(--muted); letter-spacing: .04em; }
+
+.field { display: block; margin-bottom: 12px; }
+.field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.field select, .field input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; font-size: 14px; background: #fff;
+}
+
+.btn {
+  width: 100%; padding: 10px; border-radius: 8px; border: none;
+  font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--pink); color: #fff; }
+.btn.ghost { background: #fff; color: var(--pink); border: 1.5px solid var(--pink); }
+
+.summary { margin-bottom: 8px; }
+.kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+.kv.strong { font-size: 16px; font-weight: 800; color: var(--pink); border-top: 1px dashed var(--line); padding-top: 8px; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+.mapwrap { display: flex; flex-direction: column; min-height: 0; }
+.maptoolbar {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: #fff; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.chip {
+  border: 1px solid var(--line); background: #fff; border-radius: 999px;
+  padding: 5px 12px; font-size: 12px; cursor: pointer;
+}
+.chip:hover { background: #f3f4f6; }
+.spacer { flex: 1; }
+.legend { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.mapbox { flex: 1; min-height: 0; position: relative; }
+
+.svgmap-badge {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  background: rgba(0,0,0,.6); color: #fff; font-size: 11px;
+  padding: 3px 8px; border-radius: 6px;
+}
+.svgmap-tooltip {
+  position: absolute; bottom: 12px; left: 12px;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.1);
+}
+
+.arearow {
+  display: flex; align-items: center; gap: 8px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer;
+}
+.arearow:hover { background: #fafafa; }
+.arearow .sub { font-size: 11px; color: var(--muted); }
+.arearow .remove { margin-left: auto; color: #bbb; font-weight: 700; }
+.scorepill { color: #fff; font-weight: 800; font-size: 12px; padding: 2px 8px; border-radius: 999px; }
+
+.best {
+  background: linear-gradient(135deg, #1d4ed8, #4f46e5); color: #fff;
+  border-radius: 12px; padding: 14px; margin-bottom: 12px;
+}
+.besttag { font-size: 11px; opacity: .85; }
+.bestname { font-size: 22px; font-weight: 800; }
+.bestscore { font-size: 13px; opacity: .9; }
+.explain { font-size: 13px; line-height: 1.7; white-space: pre-wrap; background: #f9fafb; border-radius: 8px; padding: 12px; }
+
+.ranktable { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.ranktable th, .ranktable td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.ranktable th { color: var(--muted); font-weight: 600; }
+.ranktable tr.top { background: #eef2ff; font-weight: 700; }
+
+@media (max-width: 1024px) {
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; }
+  .panel { max-height: none; }
+}

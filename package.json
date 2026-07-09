@@ -1,0 +1,17 @@
+{
+  "name": "posting-sys",
+  "version": "0.1.0",
+  "private": true,
+  "description": "地図からポスティングエリアと配布部数を選択し、競合分析とAIによる最適エリア提案を行うシステム",
+  "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "dev": "concurrently -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
