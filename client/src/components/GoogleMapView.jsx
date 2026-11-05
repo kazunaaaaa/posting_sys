@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps.js';
 
 function scoreColor(score) {
@@ -13,20 +13,24 @@ export default function GoogleMapView({ apiKey, center, zoom, polygons, points, 
   const polysRef = useRef([]);
   const pointsRef = useRef([]);
   const markersRef = useRef([]);
+  const [loadError, setLoadError] = useState(false);
   const onToggleRef = useRef(onToggle);
   onToggleRef.current = onToggle;
 
   useEffect(() => {
     let alive = true;
-    loadGoogleMaps(apiKey).then((maps) => {
-      if (!alive || mapRef.current) return;
-      mapRef.current = new maps.Map(ref.current, {
-        center: center || { lat: 35.68, lng: 139.76 },
-        zoom: zoom || 11,
-        mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
-      });
-      draw();
-    });
+    loadGoogleMaps(apiKey)
+      .then((maps) => {
+        if (!alive || mapRef.current) return;
+        mapRef.current = new maps.Map(ref.current, {
+          center: center || { lat: 35.68, lng: 139.76 },
+          zoom: zoom || 11,
+          mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+          gestureHandling: 'greedy',
+        });
+        draw();
+      })
+      .catch(() => { if (alive) setLoadError(true); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey]);
@@ -94,5 +98,15 @@ export default function GoogleMapView({ apiKey, center, zoom, polygons, points, 
 
   useEffect(() => { draw(); /* eslint-disable-next-line */ }, [polygons, points, competitors]);
 
+  if (loadError) {
+    return (
+      <div className="mapempty" style={{ flexDirection: 'column', gap: 8, padding: 24, textAlign: 'center' }}>
+        <b>Google Mapsの読み込みに失敗しました</b>
+        <span style={{ fontSize: 13 }}>
+          GOOGLE_MAPS_API_KEY を確認してください（Maps JavaScript API の有効化・課金設定・リファラ制限）。
+        </span>
+      </div>
+    );
+  }
   return <div ref={ref} style={{ width: '100%', height: '100%' }} />;
 }
