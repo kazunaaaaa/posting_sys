@@ -78,9 +78,9 @@ export default function SvgMapView({
                   fill={p.score != null ? scoreColor(p.score) : '#e5007e'}
                   fillOpacity={isSel ? (p.score != null ? 0.55 : 0.3) : 0.12}
                   stroke={p.best ? '#1d4ed8' : isSel ? '#e5007e' : '#9ca3af'}
-                  strokeWidth={p.best ? 4 : isSel ? 2.4 : 1} />
+                  strokeWidth={p.best ? 4 : isSel ? 2.4 : polygons.length > 60 ? 0.6 : 1} />
               ))}
-              {c && (
+              {c && (isSel || p.best || polygons.length <= 60) && (
                 <>
                   <text x={c.x} y={c.y} textAnchor="middle" fontSize="12" fontWeight="600" fill="#111" pointerEvents="none">{p.label}</text>
                   {p.score != null && <text x={c.x} y={c.y + 15} textAnchor="middle" fontSize="11" fill="#1d4ed8" fontWeight="700" pointerEvents="none">{p.score}点</text>}

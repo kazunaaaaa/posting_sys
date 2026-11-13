@@ -9,8 +9,13 @@ export default function App() {
   const [rate, setRate] = useState(0.7);
   const [mode, setMode] = useState('town'); // 'town' | 'municipality'
 
-  // 町丁目モード
+  // 町丁目モード（e-Stat 小地域の実境界。市区町村単位で読み込む）
   const [townAreas, setTownAreas] = useState([]);
+  const [townCities, setTownCities] = useState([]); // [{code, name, count}]
+  const [townPref, setTownPref] = useState('');
+  const [townPrefMunis, setTownPrefMunis] = useState([]);
+  const [townKeyword, setTownKeyword] = useState('');
+  const [townErr, setTownErr] = useState('');
   // 市区町村モード
   const [prefectures, setPrefectures] = useState([]);
   const [pref, setPref] = useState('');
@@ -35,13 +40,51 @@ export default function App() {
   const [addrMsg, setAddrMsg] = useState('');
   const mapApiRef = useRef(null);
   const handleApi = useCallback((a) => { mapApiRef.current = a; }, []);
+  const circlesRef = useRef(circles); // 地図イベントから最新の円を参照するため
+  circlesRef.current = circles;
 
   useEffect(() => {
     api.config().then(setConfig);
-    api.areas().then((d) => { setTownAreas(d.areas); setRate(d.distributionRate); });
     api.businessTypes().then((d) => setBusinessTypes(d.categories));
     api.prefectures().then((d) => setPrefectures(d.prefectures));
+    // 初期表示: 千葉県松戸市の町丁目を読み込む
+    changeTownPref('千葉県');
+    loadTownCity('12207', '松戸市');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- 町丁目の読み込み（市区町村単位）----
+  async function changeTownPref(p) {
+    setTownPref(p); setTownKeyword('');
+    if (!p) { setTownPrefMunis([]); return; }
+    const d = await api.municipalities({ pref: p });
+    setTownPrefMunis(d.municipalities);
+    setRate(d.distributionRate ?? 0.7);
+  }
+
+  async function loadTownCity(code, name) {
+    setTownErr('');
+    setLoading((l) => ({ ...l, town: name }));
+    try {
+      const d = await api.towns(code);
+      setTownAreas((prev) => {
+        const have = new Set(prev.map((t) => t.code));
+        return [...prev, ...d.towns.filter((t) => !have.has(t.code))];
+      });
+      setTownCities((prev) => (prev.some((c) => c.code === code) ? prev : [...prev, { code, name, count: d.towns.length }]));
+    } catch (e) {
+      setTownErr(`${name}の町丁目を取得できませんでした。\n${e.message}`);
+    } finally {
+      setLoading((l) => ({ ...l, town: null }));
+    }
+  }
+
+  function unloadTownCity(code) {
+    setTownAreas((prev) => prev.filter((t) => t.cityCode !== code));
+    setTownCities((prev) => prev.filter((c) => c.code !== code));
+    setSelected((prev) => prev.filter((s) => !s.startsWith(code)));
+    setAnalysis(null);
+  }
 
   // モード切替時に選択をリセット
   function switchMode(m) {
@@ -128,17 +171,31 @@ export default function App() {
     ensureBoundaries(codes);
   }
 
+  // 円は「その円で選んだコード(codes)」を保持し、移動・縮小で外れたものだけ解除する
   function addCircleAtCenter() {
     const c = mapApiRef.current?.getCenter?.();
     if (!c) return;
     const circle = { id: uid('circle'), lat: c.lat, lng: c.lng, radiusKm: Number(radiusKm) || 1 };
-    setCircles((prev) => [...prev, circle]);
-    selectCodes(codesInCircle(circle));
+    const codes = codesInCircle(circle);
+    setCircles((prev) => [...prev, { ...circle, codes }]);
+    selectCodes(codes);
   }
 
   function onCircleChange(id, next) {
-    setCircles((prev) => prev.map((c) => (c.id === id ? { ...c, ...next } : c)));
-    selectCodes(codesInCircle({ ...next }));
+    const all = circlesRef.current;
+    const cur = all.find((c) => c.id === id);
+    if (!cur) return;
+    const moved = { ...cur, ...next };
+    const newCodes = codesInCircle(moved);
+    const newSet = new Set(newCodes);
+    const others = new Set(all.filter((c) => c.id !== id).flatMap((c) => c.codes || []));
+    const drop = new Set((cur.codes || []).filter((code) => !newSet.has(code) && !others.has(code)));
+    const updated = all.map((c) => (c.id === id ? { ...moved, codes: newCodes } : c));
+    circlesRef.current = updated;
+    setCircles(updated);
+    setAnalysis(null);
+    setSelected((prev) => Array.from(new Set([...prev.filter((code) => !drop.has(code)), ...newCodes])));
+    ensureBoundaries(newCodes);
   }
 
   function removeCircle(id) {
@@ -146,8 +203,8 @@ export default function App() {
     const remaining = circles.filter((c) => c.id !== id);
     setCircles(remaining);
     if (!target) return;
-    const removed = new Set(codesInCircle(target));
-    const keep = new Set(remaining.flatMap((c) => codesInCircle(c)));
+    const removed = new Set(target.codes || []);
+    const keep = new Set(remaining.flatMap((c) => c.codes || []));
     setSelected((prev) => prev.filter((code) => keep.has(code) || !removed.has(code)));
     setAnalysis(null);
   }
@@ -193,7 +250,7 @@ export default function App() {
   const mapPolygons = useMemo(() => {
     if (mode === 'town') {
       return townAreas.map((a) => ({
-        code: a.code, rings: [a.polygon], center: a.center, label: a.name,
+        code: a.code, rings: a.polygons ?? [a.polygon], center: a.center, label: a.name,
         households: a.households, distribution: a.distribution,
         selected: selected.includes(a.code), score: scoreByCode?.[a.code], best: a.code === bestCode,
       }));
@@ -234,8 +291,49 @@ export default function App() {
           </div>
 
           {mode === 'town' ? (
-            <Section title="エリア（松戸市 町丁目 サンプル）">
-              <div className="hint">地図の区画をクリックして選択。実運用ではe-Stat小地域境界に差し替え可能。</div>
+            <Section title="町丁目を読み込む（国勢調査の実境界）">
+              <Field label="都道府県">
+                <select value={townPref} onChange={(e) => changeTownPref(e.target.value)}>
+                  <option value="">-- 都道府県を選択 --</option>
+                  {prefectures.map((p) => <option key={p.code} value={p.pref}>{p.pref}</option>)}
+                </select>
+              </Field>
+              {townPref && (
+                <>
+                  <input className="search" placeholder="市区町村を検索" value={townKeyword} onChange={(e) => setTownKeyword(e.target.value)} />
+                  <div className="munilist">
+                    {townPrefMunis
+                      // 政令指定都市は区ごとにデータがあるため、市全体（区を持つ親）は除外
+                      .filter((m) => !townPrefMunis.some((o) => o.code !== m.code && o.city.startsWith(m.city + ' ')))
+                      .filter((m) => !townKeyword || m.city.includes(townKeyword) || (m.kana || '').includes(townKeyword))
+                      .map((m) => {
+                        const loaded = townCities.some((c) => c.code === m.code);
+                        return (
+                          <div key={m.code} className="municheck">
+                            <span>{m.city}</span>
+                            <button className={`chip ${loaded ? '' : 'solid'}`} disabled={loaded || !!loading.town}
+                              onClick={() => loadTownCity(m.code, m.city)}>
+                              {loaded ? '読込済' : '＋読込'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+              {loading.town && <div className="hint">⏳ {loading.town}の町丁目を取得中…（初回は数秒）</div>}
+              {townErr && <div className="errbox">{townErr}</div>}
+              {townCities.length > 0 && (
+                <div className="citychips">
+                  {townCities.map((c) => (
+                    <span key={c.code} className="circlechip">
+                      {c.name}（{c.count}町丁目）
+                      <button onClick={() => unloadTownCity(c.code)}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="hint">地図の町丁目をクリック、または円で選択。世帯数は令和2年国勢調査（町丁・字等別）。</div>
             </Section>
           ) : (
             <Section title="全国から自治体を選択">

@@ -8,3 +8,6 @@ coverage/
 
 # 境界データのオンデマンド取得キャッシュ（実行時生成）
 server/data/boundaries/*.json
+# e-Stat 町丁目（小地域）の取得キャッシュ（実行時生成）
+server/data/towns/*.json
+server/data/towns/raw/

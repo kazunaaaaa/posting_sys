@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import areasRouter from './routes/areas.js';
+import townsRouter from './routes/towns.js';
 import municipalitiesRouter from './routes/municipalities.js';
 import competitorsRouter from './routes/competitors.js';
 import analyzeRouter from './routes/analyze.js';
@@ -26,7 +26,7 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-app.use('/api/areas', areasRouter);
+app.use('/api/towns', townsRouter);
 app.use('/api/municipalities', municipalitiesRouter);
 app.use('/api/competitors', competitorsRouter);
 app.use('/api/analyze', analyzeRouter);

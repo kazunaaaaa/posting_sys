@@ -2,7 +2,11 @@ const BASE = '/api';
 
 async function req(path, opts) {
   const res = await fetch(BASE + path, opts);
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  if (!res.ok) {
+    let detail = '';
+    try { const j = await res.json(); detail = [j.error, j.hint].filter(Boolean).join('\n'); } catch { /* noop */ }
+    throw new Error(detail || `${path} ${res.status}`);
+  }
   return res.json();
 }
 function post(path, body) {
@@ -11,8 +15,8 @@ function post(path, body) {
 
 export const api = {
   config: () => req('/config'),
-  // 町丁目（小地域）
-  areas: () => req('/areas'),
+  // 町丁目（e-Stat 小地域の実境界・世帯数）
+  towns: (city) => req('/towns?city=' + encodeURIComponent(city)),
   // 市区町村（全国）
   prefectures: () => req('/municipalities/prefectures'),
   municipalities: ({ pref, keyword } = {}) => {

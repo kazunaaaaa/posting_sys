@@ -1,14 +1,14 @@
 // コード + 粒度(level) からエリアを解決する共通ヘルパー。
-// - town(町丁目): サンプル（ポリゴン・世帯数あり）
+// - town(町丁目): e-Stat 小地域（実境界・世帯数）。KEY_CODE 先頭5桁の市区町村ごとに読み込む。
 // - municipality(市区町村): 全国マスタ（世帯数はe-Stat充填） + 境界はオンデマンド取得して結合
-import { getSmallAreasByCodes, getMunicipalitiesByCodes, distributionFor } from './estat.js';
+import { getMunicipalitiesByCodes } from './estat.js';
 import { getBoundaries } from './boundaries.js';
-import { areaKm2 } from './geo.js';
+import { getTownsByCodes } from './towns.js';
 
 export async function resolveAreas(codes, level = 'municipality', { withBoundary = true } = {}) {
   if (!codes?.length) return [];
   if (level === 'town') {
-    return getSmallAreasByCodes(codes);
+    return getTownsByCodes(codes);
   }
   const munis = await getMunicipalitiesByCodes(codes);
   if (!withBoundary) {

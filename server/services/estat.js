@@ -1,14 +1,12 @@
-// 世帯数・エリアデータサービス
+// 市区町村の世帯数・エリアデータサービス
 //
-// 粒度は2種類:
-//   - 市区町村 (municipality): 全国マスタ(municipalities.json)。世帯数は e-Stat で充填。
-//   - 町丁目 (small area): 同梱サンプル(households.sample.json, 松戸市)。e-Stat 小地域で差し替え可。
+//   - 市区町村 (municipality): 全国マスタ(municipalities.json)。世帯数は e-Stat API で充填。
+//   - 町丁目は services/towns.js（e-Stat 小地域の実境界・世帯数）を参照。
 //
 // 配布部数 = 世帯数 × DISTRIBUTION_RATE (要件: 最新世帯数/国勢調査世帯数の70%)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { centroid, areaKm2 } from './geo.js';
 import { fetchMunicipalityHouseholds } from './estatClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,46 +16,6 @@ export const DISTRIBUTION_RATE = 0.7;
 export function distributionFor(households) {
   if (households == null) return null;
   return Math.round(households * DISTRIBUTION_RATE);
-}
-
-// ---------- 町丁目サンプル ----------
-let sampleCache = null;
-function loadSample() {
-  if (!sampleCache) {
-    const raw = fs.readFileSync(path.join(__dirname, '..', 'data', 'households.sample.json'), 'utf-8');
-    sampleCache = JSON.parse(raw);
-  }
-  return sampleCache;
-}
-
-function enrichSmallArea(area) {
-  const c = centroid(area.polygon);
-  const km2 = areaKm2(area.polygon);
-  return {
-    level: 'town',
-    code: area.code,
-    pref: area.pref,
-    city: area.city,
-    name: area.name,
-    households: area.households,
-    distribution: distributionFor(area.households),
-    distributionRate: DISTRIBUTION_RATE,
-    center: c,
-    areaKm2: +km2.toFixed(3),
-    householdDensity: +(area.households / Math.max(km2, 0.01)).toFixed(0),
-    polygon: area.polygon,
-  };
-}
-
-export async function getSmallAreas() {
-  const sample = loadSample();
-  return { source: 'sample', meta: sample.meta, areas: sample.areas.map(enrichSmallArea) };
-}
-
-export async function getSmallAreasByCodes(codes) {
-  const { areas } = await getSmallAreas();
-  const set = new Set(codes);
-  return areas.filter((a) => set.has(a.code));
 }
 
 // ---------- 全国市区町村マスタ ----------

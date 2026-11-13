@@ -105,7 +105,12 @@ async function fromOverpass(bt, areas) {
   try {
     const res = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+        // Overpass は識別できない自動アクセスを 406/429 で拒否するため、アクセス元を明示する
+        'User-Agent': 'posting-sys/0.1 (+https://github.com/kazunaaaaa/posting_sys)',
+      },
       body: 'data=' + encodeURIComponent(query),
     });
     if (!res.ok) throw new Error(`Overpass ${res.status}`);

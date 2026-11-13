@@ -8,11 +8,17 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "estat:check": "node scripts/estat-check.mjs",
-    "test": "node test/estatClient.test.mjs"
+    "test": "node test/estatClient.test.mjs && node test/towns.test.mjs",
+    "towns:fetch": "node scripts/towns-fetch.mjs"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "shapefile": "^0.6.6"
+  },
+  "devDependencies": {
+    "iconv-lite": "^0.6.3"
   }
 }
