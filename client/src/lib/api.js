@@ -26,6 +26,9 @@ export const api = {
     return req('/municipalities?' + q.toString());
   },
   boundaries: (codes) => post('/municipalities/boundaries', { codes }),
+  // ピン周辺の市区町村（県境をまたぐ）
+  nearby: (lat, lng, km = 6, limit = 8) =>
+    req(`/municipalities/nearby?lat=${lat}&lng=${lng}&km=${km}&limit=${limit}`),
   // 競合・分析・見積
   businessTypes: () => req('/competitors/business-types'),
   searchCompetitors: (businessTypeId, codes, level) => post('/competitors/search', { businessTypeId, codes, level }),
@@ -33,4 +36,18 @@ export const api = {
     post('/analyze', { codes, level, businessTypeId, competitors, unitCost }),
   pricingCompanies: () => req('/pricing/companies'),
   quotes: (codes, level) => post('/pricing/quotes', { codes, level }),
+  // 配布部数表（Excel）: { blob, filename }
+  exportAreaXlsx: async (payload) => {
+    const res = await fetch(BASE + '/export/area-xlsx', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch { /* noop */ }
+      throw new Error(msg);
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    return { blob: await res.blob(), filename: m ? decodeURIComponent(m[1]) : 'エリア表.xlsx' };
+  },
 };

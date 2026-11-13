@@ -8,17 +8,23 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "estat:check": "node scripts/estat-check.mjs",
-    "test": "node test/estatClient.test.mjs && node test/towns.test.mjs",
+    "test": "node test/estatClient.test.mjs && node test/towns.test.mjs && node test/exportArea.test.mjs",
     "towns:fetch": "node scripts/towns-fetch.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
     "express": "^4.22.3",
     "shapefile": "^0.6.6"
   },
   "devDependencies": {
     "iconv-lite": "^0.6.3"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

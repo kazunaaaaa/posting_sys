@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
+import { COLORS } from '../lib/colors.js';
 
 // Google Maps キー未設定時のフォールバック簡易地図（SVG）。
 // polygons(複数リング) + points(候補重心) + competitors + circles(範囲円) を等距離近似で投影。
 function scoreColor(score) {
-  if (score == null) return '#e5007e';
+  if (score == null) return COLORS.selFill;
   const hue = (score / 100) * 120;
   return `hsl(${hue}, 80%, 45%)`;
 }
 
 export default function SvgMapView({
-  polygons, points, competitors, circles = [], businessIcon, onToggle, onApi, emptyHint,
+  polygons, points, competitors, circles = [], pin = null, pinLabel = '', businessIcon, onToggle, onApi, emptyHint,
 }) {
   const [hover, setHover] = useState(null);
   const W = 900, H = 640, pad = 44;
@@ -24,6 +25,7 @@ export default function SvgMapView({
     for (const p of points) acc(p.lng, p.lat);
     for (const c of competitors) acc(c.lng, c.lat);
     for (const c of circles) acc(c.lng, c.lat);
+    if (pin) acc(pin.lng, pin.lat);
     if (!Number.isFinite(minLng)) return null;
     const latMid = (minLat + maxLat) / 2;
     const cosLat = Math.cos((latMid * Math.PI) / 180);
@@ -38,7 +40,7 @@ export default function SvgMapView({
     });
     const mToPx = scale / 111320; // メートル→ピクセル（緯度基準の近似）
     return { project, mToPx, center: { lat: latMid, lng: (minLng + maxLng) / 2 } };
-  }, [polygons, points, competitors, circles]);
+  }, [polygons, points, competitors, circles, pin]);
 
   // 地図API（中心取得）を親へ公開。SVGは住所ジオコーディング非対応。
   useEffect(() => {
@@ -62,7 +64,7 @@ export default function SvgMapView({
             <g key={'pt-' + p.code} onClick={() => onToggle(p.code)} style={{ cursor: 'pointer' }}
                onMouseEnter={() => setHover({ ...p, kind: 'pt' })} onMouseLeave={() => setHover(null)}>
               <circle cx={s.x} cy={s.y} r={p.selected ? 7 : 5}
-                fill={p.selected ? '#e5007e' : '#fff'} stroke="#e5007e" strokeWidth="1.6" />
+                fill={p.selected ? COLORS.selFill : '#fff'} stroke={COLORS.selStroke} strokeWidth="1.6" />
             </g>
           );
         })}
@@ -75,10 +77,11 @@ export default function SvgMapView({
               {p.rings.map((ring, i) => (
                 <polygon key={i}
                   points={ring.map(([lng, lat]) => { const s = project(lng, lat); return `${s.x},${s.y}`; }).join(' ')}
-                  fill={p.score != null ? scoreColor(p.score) : '#e5007e'}
-                  fillOpacity={isSel ? (p.score != null ? 0.55 : 0.3) : 0.12}
-                  stroke={p.best ? '#1d4ed8' : isSel ? '#e5007e' : '#9ca3af'}
-                  strokeWidth={p.best ? 4 : isSel ? 2.4 : polygons.length > 60 ? 0.6 : 1} />
+                  fill={p.score != null ? scoreColor(p.score) : COLORS.selFill}
+                  fillOpacity={isSel ? (p.score != null ? 0.55 : 0.45) : 0.03}
+                  stroke={p.best ? '#1d4ed8' : isSel ? COLORS.selStroke : COLORS.baseStroke}
+                  strokeOpacity={isSel || p.best ? 1 : 0.7}
+                  strokeWidth={p.best ? 4 : isSel ? 2 : polygons.length > 60 ? 0.6 : 1} />
               ))}
               {c && (isSel || p.best || polygons.length <= 60) && (
                 <>
@@ -94,7 +97,7 @@ export default function SvgMapView({
           const s = project(c.lng, c.lat);
           return (
             <circle key={'cir-' + c.id} cx={s.x} cy={s.y} r={Math.max(4, c.radiusKm * 1000 * mToPx)}
-              fill="#e5007e" fillOpacity="0.07" stroke="#e5007e" strokeWidth="2" strokeDasharray="6 4" pointerEvents="none" />
+              fill={COLORS.circle} fillOpacity="0.04" stroke={COLORS.circle} strokeWidth="2.5" pointerEvents="none" />
           );
         })}
         {competitors.map((c) => {
@@ -105,10 +108,23 @@ export default function SvgMapView({
             </circle>
           );
         })}
+        {/* 中心地のピン */}
+        {pin && (() => {
+          const s = project(pin.lng, pin.lat);
+          return (
+            <g pointerEvents="none">
+              <path d={`M ${s.x} ${s.y} C ${s.x - 2} ${s.y - 10} ${s.x - 9} ${s.y - 13} ${s.x - 9} ${s.y - 19} A 9 9 0 1 1 ${s.x + 9} ${s.y - 19} C ${s.x + 9} ${s.y - 13} ${s.x + 2} ${s.y - 10} ${s.x} ${s.y} Z`}
+                fill={COLORS.pin} stroke="#7f1010" strokeWidth="1.2" />
+              <circle cx={s.x} cy={s.y - 19} r="3.4" fill="#7f1010" />
+              {pinLabel && <text x={s.x} y={s.y + 14} textAnchor="middle" fontSize="12" fontWeight="700" fill="#111"
+                stroke="#fff" strokeWidth="3" paintOrder="stroke">{pinLabel}</text>}
+            </g>
+          );
+        })()}
       </svg>
       {hover && (
         <div className="svgmap-tooltip">
-          <b>{hover.label || hover.name}</b>
+          <b>{hover.fullName || hover.label || hover.name}</b>
           {hover.households != null && <><br />世帯 {hover.households.toLocaleString()} / 配布 {hover.distribution?.toLocaleString()}部</>}
           {hover.households == null && hover.kind && <><br />世帯数: e-Stat接続で取得</>}
         </div>

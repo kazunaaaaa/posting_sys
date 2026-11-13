@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './lib/api.js';
 import { distanceMeters, uid } from './lib/geo.js';
+import { pickByCount } from './lib/selectByCount.js';
+import { buildMapImage } from './lib/mapImage.js';
+import { townLabel } from './lib/labels.js';
+import { COLORS } from './lib/colors.js';
+
+// 「📍から約 N 部を追加」の選択肢
+const COUNT_OPTIONS = [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000, 50000, 100000];
 import GoogleMapView from './components/GoogleMapView.jsx';
 import SvgMapView from './components/SvgMapView.jsx';
 
@@ -43,13 +50,27 @@ export default function App() {
   const circlesRef = useRef(circles); // 地図イベントから最新の円を参照するため
   circlesRef.current = circles;
 
+  // 中心地のピン・部数指定
+  const [pin, setPin] = useState(null); // {lat, lng}
+  const [countTarget, setCountTarget] = useState(10000);
+  const [countMsg, setCountMsg] = useState('');
+
+  // 配布部数表（Excel）
+  const [storeName, setStoreName] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [titleCopies, setTitleCopies] = useState(''); // 空なら合計を1,000部単位に丸めた値
+  const [exportMsg, setExportMsg] = useState('');
+
+  // 非同期処理の途中でも最新の町丁目を参照するための参照
+  const townAreasRef = useRef(townAreas);
+  townAreasRef.current = townAreas;
+  const townCitiesRef = useRef(townCities);
+  townCitiesRef.current = townCities;
+
   useEffect(() => {
     api.config().then(setConfig);
     api.businessTypes().then((d) => setBusinessTypes(d.categories));
     api.prefectures().then((d) => setPrefectures(d.prefectures));
-    // 初期表示: 千葉県松戸市の町丁目を読み込む
-    changeTownPref('千葉県');
-    loadTownCity('12207', '松戸市');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -62,26 +83,34 @@ export default function App() {
     setRate(d.distributionRate ?? 0.7);
   }
 
-  async function loadTownCity(code, name) {
-    setTownErr('');
+  // 市区町村の町丁目を読み込む。quiet=true のときは失敗してもエラー枠を出さず例外を投げる。
+  async function loadTownCity(code, name, { quiet = false } = {}) {
+    if (townCitiesRef.current.some((c) => c.code === code)) return [];
+    if (!quiet) setTownErr('');
     setLoading((l) => ({ ...l, town: name }));
     try {
       const d = await api.towns(code);
-      setTownAreas((prev) => {
-        const have = new Set(prev.map((t) => t.code));
-        return [...prev, ...d.towns.filter((t) => !have.has(t.code))];
-      });
-      setTownCities((prev) => (prev.some((c) => c.code === code) ? prev : [...prev, { code, name, count: d.towns.length }]));
+      const have = new Set(townAreasRef.current.map((t) => t.code));
+      const added = d.towns.filter((t) => !have.has(t.code));
+      townAreasRef.current = [...townAreasRef.current, ...added];
+      townCitiesRef.current = [...townCitiesRef.current, { code, name, count: d.towns.length }];
+      setTownAreas(townAreasRef.current);
+      setTownCities(townCitiesRef.current);
+      return added;
     } catch (e) {
+      if (quiet) throw e;
       setTownErr(`${name}の町丁目を取得できませんでした。\n${e.message}`);
+      return [];
     } finally {
       setLoading((l) => ({ ...l, town: null }));
     }
   }
 
   function unloadTownCity(code) {
-    setTownAreas((prev) => prev.filter((t) => t.cityCode !== code));
-    setTownCities((prev) => prev.filter((c) => c.code !== code));
+    townAreasRef.current = townAreasRef.current.filter((t) => t.cityCode !== code);
+    townCitiesRef.current = townCitiesRef.current.filter((c) => c.code !== code);
+    setTownAreas(townAreasRef.current);
+    setTownCities(townCitiesRef.current);
     setSelected((prev) => prev.filter((s) => !s.startsWith(code)));
     setAnalysis(null);
   }
@@ -89,6 +118,7 @@ export default function App() {
   // モード切替時に選択をリセット
   function switchMode(m) {
     setMode(m); setSelected([]); setCircles([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null);
+    setCountMsg(''); setExportMsg('');
   }
 
   async function changePref(p) {
@@ -107,10 +137,31 @@ export default function App() {
   const byCode = useMemo(() => Object.fromEntries(currentAreas.map((a) => [a.code, a])), [currentAreas]);
   const selectedAreas = useMemo(() => selected.map((c) => byCode[c]).filter(Boolean), [selected, byCode]);
 
+  // 選択中エリアを市区町村ごとにまとめる（右パネル表示用）
+  const selectedGroups = useMemo(() => {
+    const groups = new Map();
+    for (const a of selectedAreas) {
+      const key = mode === 'town' ? a.cityCode : a.pref;
+      if (!groups.has(key)) groups.set(key, { key, label: mode === 'town' ? `${a.pref}　${a.city}` : a.pref, areas: [], copies: 0 });
+      const g = groups.get(key);
+      g.areas.push(a);
+      g.copies += a.distribution || 0;
+    }
+    return [...groups.values()];
+  }, [selectedAreas, mode]);
+
+  function deselectGroup(g) {
+    const codes = new Set(g.areas.map((a) => a.code));
+    setSelected((prev) => prev.filter((c) => !codes.has(c)));
+    setAnalysis(null);
+  }
+
   const totalHouseholds = selectedAreas.reduce((s, a) => s + (a.households || 0), 0);
   const hasNullHh = selectedAreas.some((a) => a.households == null);
   const totalDistribution = selectedAreas.reduce((s, a) => s + (a.distribution || 0), 0);
   const estCost = Math.round(totalDistribution * unitCost);
+  // 配布部数表のタイトル用（例: 30,460部 → 30000部エリア）
+  const autoTitleCopies = totalDistribution >= 1000 ? Math.round(totalDistribution / 1000) * 1000 : totalDistribution;
 
   const scoreByCode = useMemo(() => {
     if (!analysis) return null;
@@ -133,7 +184,10 @@ export default function App() {
     }
   }
 
-  function clearAll() { setSelected([]); setCircles([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null); }
+  function clearAll() {
+    setSelected([]); setCircles([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null);
+    setCountMsg(''); setExportMsg('');
+  }
 
   // ---- 範囲選択（円） ----
   // 現在モードの各エリアの中心（町丁目=重心, 市区町村=代表点）
@@ -171,9 +225,24 @@ export default function App() {
     ensureBoundaries(codes);
   }
 
-  // 円は「その円で選んだコード(codes)」を保持し、移動・縮小で外れたものだけ解除する
-  function addCircleAtCenter() {
+  // ---- 中心地のピン ----
+  // ピンが無ければ地図の中心に立てて返す
+  function ensurePin() {
+    if (pin) return pin;
     const c = mapApiRef.current?.getCenter?.();
+    if (!c) return null;
+    setPin(c);
+    return c;
+  }
+
+  function movePinToCenter() {
+    const c = mapApiRef.current?.getCenter?.();
+    if (c) setPin(c);
+  }
+
+  // 円は「その円で選んだコード(codes)」を保持し、移動・縮小で外れたものだけ解除する
+  function addCircleAtPin() {
+    const c = ensurePin();
     if (!c) return;
     const circle = { id: uid('circle'), lat: c.lat, lng: c.lng, radiusKm: Number(radiusKm) || 1 };
     const codes = codesInCircle(circle);
@@ -218,9 +287,100 @@ export default function App() {
     setAddrMsg('検索中…');
     try {
       const r = await geocode(q);
-      mapApiRef.current.panTo({ lat: r.lat, lng: r.lng }, 14);
-      setAddrMsg(r.formatted || '移動しました');
+      const p = { lat: r.lat, lng: r.lng };
+      mapApiRef.current.panTo(p, 15);
+      setPin(p); // 検索した住所に中心地のピンを立てる
+      setAddrMsg(`📍 ${r.formatted || q}`);
     } catch { setAddrMsg('住所が見つかりませんでした'); }
+  }
+
+  // ---- 「📍から約 N 部を追加」----
+  // ピン周辺の市区町村（県境をまたぐ）の町丁目を自動で読み込み、近い順に目標部数まで選ぶ
+  async function addByCount() {
+    if (mode !== 'town') return;
+    const p = ensurePin();
+    if (!p) return;
+    const target = Number(countTarget);
+    const failed = new Set();
+
+    const loadNearby = async (km, limit) => {
+      const { municipalities } = await api.nearby(p.lat, p.lng, km, limit);
+      const toLoad = municipalities.filter((m) => !townCitiesRef.current.some((c) => c.code === m.code) && !failed.has(m.city));
+      if (!toLoad.length) return;
+      setCountMsg(`周辺の町丁目を読み込み中…（${toLoad.map((m) => m.city.replace(' ', '')).join('・')}）`);
+      const results = await Promise.allSettled(toLoad.map((m) => loadTownCity(m.code, m.city.replace(' ', ''), { quiet: true })));
+      results.forEach((r, i) => { if (r.status === 'rejected') failed.add(toLoad[i].city.replace(' ', '')); });
+    };
+    const compute = () => {
+      const sel = new Set(selected);
+      const candidates = townAreasRef.current.filter((t) => !sel.has(t.code));
+      return pickByCount(candidates, p, target);
+    };
+
+    try {
+      setCountMsg('周辺の市区町村を確認中…');
+      await loadNearby(5, 6);
+      let r = compute();
+      if (r.sum < target) { // 足りなければ範囲を広げて再試行
+        await loadNearby(12, 15);
+        r = compute();
+      }
+      if (!r.codes.length) { setCountMsg('追加できる町丁目が見つかりませんでした'); return; }
+      selectCodes(r.codes);
+      setCountMsg(`📍から約${target.toLocaleString()}部 → ${r.sum.toLocaleString()}部（${r.codes.length}エリア・半径約${r.maxDistanceKm}km）を追加しました`
+        + (failed.size ? `\n※ 読み込めなかった市区町村: ${[...failed].join('、')}` : ''));
+    } catch (e) {
+      setCountMsg(`部数追加に失敗しました: ${e.message}`);
+    }
+  }
+
+  // ---- 配布部数表（Excel）ダウンロード ----
+  async function downloadAreaTable() {
+    if (!selectedAreas.length) return;
+    setLoading((l) => ({ ...l, export: true }));
+    setExportMsg('地図画像を作成中…');
+    try {
+      const ordered = [...selectedAreas].sort((a, b) => String(a.code).localeCompare(String(b.code)));
+      const isTown = mode === 'town';
+      const rows = ordered.map((a) => ({
+        city: isTown ? a.city : a.pref,
+        town: isTown ? a.name : a.city,
+        households: a.households,
+      }));
+      if (rows.some((r) => r.households == null)) throw new Error('世帯数が未取得のエリアがあります（e-Stat接続が必要）');
+
+      let map = null;
+      try {
+        const areas = ordered.map((a) => (isTown
+          ? { rings: a.polygons ?? [a.polygon], center: a.center, name: a.name }
+          : boundaryMap[a.code] && { rings: boundaryMap[a.code].polygons, center: boundaryMap[a.code].center, name: a.city })).filter(Boolean);
+        map = await buildMapImage({ areas, circles, pin, pinLabel: storeName, labelOf: isTown ? townLabel : (n) => n });
+      } catch (e) {
+        console.warn('map image failed', e);
+      }
+
+      setExportMsg('Excelを作成中…');
+      const { blob, filename } = await api.exportAreaXlsx({
+        rows,
+        coverRate: rate,
+        storeName,
+        projectName,
+        targetCopies: Number(titleCopies) > 0 ? Number(titleCopies) : autoTitleCopies,
+        mapImage: map?.dataUrl,
+        mapSize: map ? { width: map.width, height: map.height } : undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setExportMsg(`✅ ${filename} をダウンロードしました`
+        + (!map ? '\n※ 地図画像を作成できませんでした' : !map.baseMap ? '\n※ ベース地図を取得できなかったため、背景なしの地図を貼り付けました（Google Cloudで「Maps Static API」を有効化してください）' : ''));
+    } catch (e) {
+      setExportMsg(`出力に失敗しました: ${e.message}`);
+    } finally {
+      setLoading((l) => ({ ...l, export: false }));
+    }
   }
 
   async function loadCompetitors() {
@@ -250,7 +410,8 @@ export default function App() {
   const mapPolygons = useMemo(() => {
     if (mode === 'town') {
       return townAreas.map((a) => ({
-        code: a.code, rings: a.polygons ?? [a.polygon], center: a.center, label: a.name,
+        code: a.code, rings: a.polygons ?? [a.polygon], center: a.center,
+        label: townLabel(a.name), fullName: `${a.city}${a.name}`,
         households: a.households, distribution: a.distribution,
         selected: selected.includes(a.code), score: scoreByCode?.[a.code], best: a.code === bestCode,
       }));
@@ -333,7 +494,10 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <div className="hint">地図の町丁目をクリック、または円で選択。世帯数は令和2年国勢調査（町丁・字等別）。</div>
+              <div className="hint">
+                使い方: 地図上の住所検索でピンを立てて「📍から約○部を追加」すると、周辺の市区町村（県境をまたいでも可）を自動で読み込んで選択します。
+                市区町村を指定して読み込み、町丁目をクリックや円で選ぶこともできます。世帯数は令和2年国勢調査（町丁・字等別）。
+              </div>
             </Section>
           ) : (
             <Section title="全国から自治体を選択">
@@ -396,22 +560,36 @@ export default function App() {
         <main className="mapwrap">
           <div className="maptoolbar">
             <form className="addrbox" onSubmit={searchAddress}>
-              <input placeholder="住所・地名で移動" value={addrQuery} onChange={(e) => setAddrQuery(e.target.value)} />
+              <input placeholder="住所・店舗名で検索（ピンを立てる）" value={addrQuery} onChange={(e) => setAddrQuery(e.target.value)} />
               <button type="submit" className="chip">🔍</button>
             </form>
-            <span className="circlectl">
-              半径
-              <input type="number" min="0.2" step="0.1" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
-              km
-              <button className="chip solid" onClick={addCircleAtCenter}>⊕ 地図中心に円を追加</button>
-            </span>
+            <button className="chip" onClick={movePinToCenter} title="地図の中心にピンを移動">📍を地図の中心に <b className="link">移動</b></button>
             <button className="chip" onClick={clearAll}>クリア</button>
             <span className="spacer" />
-            <LegendDot color="#e5007e" label="選択エリア" />
+            <LegendDot color={COLORS.selFill} label="選択エリア" />
+            <LegendDot color={COLORS.circle} label="円" />
             <LegendDot color="#7c3aed" label="競合" />
             {analysis && <LegendGradient />}
           </div>
-          {(circles.length > 0 || addrMsg) && (
+          <div className="maptoolbar sub">
+            <span className="circlectl">
+              円選択　半径
+              <input type="number" min="0.2" step="0.1" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
+              km
+              <button className="chip red" onClick={addCircleAtPin}>円を追加</button>
+            </span>
+            {mode === 'town' && (
+              <span className="countctl">
+                📍から 約
+                <select value={countTarget} onChange={(e) => setCountTarget(Number(e.target.value))}>
+                  {COUNT_OPTIONS.map((n) => <option key={n} value={n}>{n.toLocaleString()}部</option>)}
+                </select>
+                を
+                <button className="chip solid" onClick={addByCount} disabled={!!loading.town}>追加</button>
+              </span>
+            )}
+          </div>
+          {(circles.length > 0 || addrMsg || countMsg) && (
             <div className="circlebar">
               {circles.map((c, i) => (
                 <span key={c.id} className="circlechip">
@@ -420,6 +598,7 @@ export default function App() {
                 </span>
               ))}
               {addrMsg && <span className="addrmsg">{addrMsg}</span>}
+              {countMsg && <span className="addrmsg countmsg">{countMsg}</span>}
             </div>
           )}
           <div className="mapbox">
@@ -431,10 +610,13 @@ export default function App() {
               points={mapPoints}
               competitors={competitors}
               circles={circles}
+              pin={pin}
+              pinLabel={storeName}
               businessIcon={businessIcon}
               onToggle={toggle}
               onApi={handleApi}
               onCircleChange={onCircleChange}
+              onPinChange={setPin}
               emptyHint={mode === 'municipality' ? '都道府県を選び、自治体を選択してください' : 'エリアを選択してください'}
             />
           </div>
@@ -442,18 +624,48 @@ export default function App() {
 
         {/* 右パネル */}
         <aside className="panel right">
-          <Section title={`選択中エリア (${selectedAreas.length})`}>
-            {selectedAreas.length === 0 && <div className="hint">エリアを選択してください。</div>}
-            {selectedAreas.map((a) => (
-              <div key={a.code} className="arearow" onClick={() => toggle(a.code)}>
-                <div>
-                  <b>{a.name || a.city}</b>
-                  <div className="sub">{a.households != null ? `世帯 ${a.households.toLocaleString()} → 配布 ${a.distribution.toLocaleString()}部` : '世帯数: e-Stat接続で取得'}</div>
+          <Section title="選択中エリア">
+            <div className="selhead">
+              <span>{totalDistribution ? `${totalDistribution.toLocaleString()}部` : '—'}</span>
+              <span>全{selectedAreas.length}エリア</span>
+            </div>
+            {selectedAreas.length === 0 && <div className="hint">地図からエリアを選択してください。</div>}
+            {selectedGroups.map((g) => (
+              <div key={g.key} className="selgroup">
+                <div className="selgroup-head">
+                  <b>{g.label}</b>
+                  <span>{g.copies.toLocaleString()}部・{g.areas.length}エリア</span>
                 </div>
-                {scoreByCode && scoreByCode[a.code] != null && <span className="scorepill" style={{ background: `hsl(${scoreByCode[a.code] * 1.2},70%,45%)` }}>{scoreByCode[a.code]}</span>}
-                <span className="remove">×</span>
+                {g.areas.map((a) => (
+                  <div key={a.code} className="selrow">
+                    <span className="selname">{mode === 'town' ? townLabel(a.name) : a.city}</span>
+                    <span className="selcopies">{a.distribution != null ? `${a.distribution.toLocaleString()}部` : '—'}</span>
+                    {scoreByCode && scoreByCode[a.code] != null && <span className="scorepill" style={{ background: `hsl(${scoreByCode[a.code] * 1.2},70%,45%)` }}>{scoreByCode[a.code]}</span>}
+                    <button className="selx" onClick={() => toggle(a.code)} title="選択解除">×</button>
+                  </div>
+                ))}
+                <button className="linkbtn" onClick={() => deselectGroup(g)}>このエリアを選択解除</button>
               </div>
             ))}
+            {selectedAreas.length > 0 && <button className="linkbtn danger" onClick={clearAll}>すべてのエリアを選択解除</button>}
+          </Section>
+
+          <Section title="📥 配布部数表（エリア表）">
+            <Field label="店舗名（タイトル・地図のピンに表示）">
+              <input value={storeName} placeholder="例: ○○広尾店" onChange={(e) => setStoreName(e.target.value)} />
+            </Field>
+            <Field label="案件名">
+              <input value={projectName} placeholder="例: オープン案件" onChange={(e) => setProjectName(e.target.value)} />
+            </Field>
+            <Field label="タイトルの部数（空欄なら合計を千部単位で自動）">
+              <input type="number" step="1000" value={titleCopies} placeholder={`自動: ${autoTitleCopies.toLocaleString()}部`}
+                onChange={(e) => setTitleCopies(e.target.value)} />
+            </Field>
+            <button className="btn primary" disabled={!selectedAreas.length || loading.export} onClick={downloadAreaTable}>
+              {loading.export ? '作成中…' : '配布部数表ダウンロード（Excel）'}
+            </button>
+            <div className="hint">市区町村名・町丁目名・世帯数・配布予定数（=ROUNDDOWN(世帯数×カバー率,-1)）と地図を出力します。Googleスプレッドシートでもそのまま開けます。</div>
+            {exportMsg && <div className={exportMsg.startsWith('出力に失敗') ? 'errbox' : 'okbox'}>{exportMsg}</div>}
           </Section>
 
           {analysis && (

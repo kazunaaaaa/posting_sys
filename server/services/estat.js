@@ -8,15 +8,12 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchMunicipalityHouseholds } from './estatClient.js';
+import { distanceMeters } from './geo.js';
+import { DISTRIBUTION_RATE, distributionFor } from './distribution.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const DISTRIBUTION_RATE = 0.7;
-
-export function distributionFor(households) {
-  if (households == null) return null;
-  return Math.round(households * DISTRIBUTION_RATE);
-}
+export { DISTRIBUTION_RATE, distributionFor };
 
 // ---------- 全国市区町村マスタ ----------
 let muniCache = null;
@@ -103,4 +100,20 @@ async function fetchEstatHouseholds(appId, statsDataId) {
   });
   console.log(`[estat] 世帯数取得: ${meta.municipalityCount}市区町村 (世帯分類=${meta.household.name}, 時間=${meta.timeCode})`);
   return households;
+}
+
+// ---------- ピン周辺の市区町村（町丁目の自動読込用）----------
+// 都道府県をまたいで、代表点がピンから km 以内の市区町村を近い順に返す。
+// 政令指定都市は区単位でデータがあるため、区を持つ親（例: 相模原市）は除外。
+
+export function nearbyMunicipalities(lat, lng, { km = 6, limit = 8 } = {}) {
+  const { municipalities } = loadMunicipalities();
+  const isParent = (m) => municipalities.some((o) => o.code !== m.code && o.city.startsWith(m.city + ' '));
+  return municipalities
+    .map((m) => ({ code: m.code, pref: m.pref, city: m.city, distanceKm: distanceMeters(lat, lng, m.lat, m.lng) / 1000 }))
+    .filter((m) => m.distanceKm <= km)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .filter((m) => !isParent(m))
+    .slice(0, limit)
+    .map((m) => ({ ...m, distanceKm: +m.distanceKm.toFixed(2) }));
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps.js';
+import { COLORS } from '../lib/colors.js';
 
 function scoreColor(score) {
   if (score == null) return '#e5007e';
@@ -7,19 +8,22 @@ function scoreColor(score) {
   return `hsl(${hue}, 80%, 45%)`;
 }
 
+// 未選択の区画もクリックできるよう、塗りはごく薄く残す
+
 function polygonStyle(p) {
   return {
-    strokeColor: p.best ? '#1d4ed8' : p.selected ? '#e5007e' : '#7b8494',
-    strokeWeight: p.best ? 4 : p.selected ? 2.4 : 0.8,
-    strokeOpacity: p.selected || p.best ? 0.95 : 0.6,
-    fillColor: p.score != null ? scoreColor(p.score) : '#e5007e',
-    fillOpacity: p.selected ? (p.score != null ? 0.5 : 0.35) : 0.06,
+    strokeColor: p.best ? '#1d4ed8' : p.selected ? COLORS.selStroke : COLORS.baseStroke,
+    strokeWeight: p.best ? 4 : p.selected ? 2 : 1,
+    strokeOpacity: p.selected || p.best ? 0.95 : 0.75,
+    fillColor: p.score != null ? scoreColor(p.score) : COLORS.selFill,
+    fillOpacity: p.selected ? (p.score != null ? 0.5 : 0.42) : 0.02,
     zIndex: p.best ? 3 : p.selected ? 2 : 1,
   };
 }
 
 export default function GoogleMapView({
-  apiKey, center, zoom, polygons, points, competitors, circles = [], onToggle, onApi, onCircleChange,
+  apiKey, center, zoom, polygons, points, competitors, circles = [], pin = null, pinLabel = '',
+  onToggle, onApi, onCircleChange, onPinChange,
 }) {
   const ref = useRef(null);
   const mapRef = useRef(null);
@@ -27,14 +31,17 @@ export default function GoogleMapView({
   const pointsRef = useRef([]);
   const markersRef = useRef([]);
   const circlesRef = useRef({}); // id -> google.maps.Circle
+  const pinRef = useRef(null);
   const infoRef = useRef(null);
   const geocoderRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const onToggleRef = useRef(onToggle);
   const onCircleChangeRef = useRef(onCircleChange);
+  const onPinChangeRef = useRef(onPinChange);
   onToggleRef.current = onToggle;
   onCircleChangeRef.current = onCircleChange;
+  onPinChangeRef.current = onPinChange;
 
   useEffect(() => {
     let alive = true;
@@ -97,7 +104,7 @@ export default function GoogleMapView({
             ? `世帯 ${d.households.toLocaleString()}<br>配布 ${d.distribution?.toLocaleString()}部`
             : '世帯数: e-Stat接続で取得';
           infoRef.current.setContent(
-            `<div style="font-size:12px;line-height:1.5"><b>${d.label}</b><br>${hh}${d.score != null ? `<br>スコア ${d.score}点` : ''}</div>`
+            `<div style="font-size:12px;line-height:1.5"><b>${d.fullName || d.label}</b><br>${hh}${d.score != null ? `<br>スコア ${d.score}点` : ''}</div>`
           );
           infoRef.current.setPosition({ lat: d.center.lat, lng: d.center.lng });
           infoRef.current.open(map);
@@ -137,7 +144,7 @@ export default function GoogleMapView({
       const marker = new maps.Marker({
         position: { lat: p.lat, lng: p.lng }, map,
         icon: { path: maps.SymbolPath.CIRCLE, scale: p.selected ? 7 : 5,
-          fillColor: p.selected ? '#e5007e' : '#ffffff', fillOpacity: 1, strokeColor: '#e5007e', strokeWeight: 1.6 },
+          fillColor: p.selected ? COLORS.selFill : '#ffffff', fillOpacity: 1, strokeColor: COLORS.selStroke, strokeWeight: 1.6 },
         title: p.label,
       });
       marker.addListener('click', () => onToggleRef.current(p.code));
@@ -169,7 +176,7 @@ export default function GoogleMapView({
       if (!circle) {
         circle = new maps.Circle({
           map: mapRef.current, center: { lat: c.lat, lng: c.lng }, radius: c.radiusKm * 1000,
-          strokeColor: '#e5007e', strokeWeight: 2, fillColor: '#e5007e', fillOpacity: 0.06,
+          strokeColor: COLORS.circle, strokeWeight: 2.5, fillColor: COLORS.circle, fillOpacity: 0.04,
           editable: true, draggable: true, clickable: false, zIndex: 5,
         });
         const sync = () => {
@@ -191,7 +198,25 @@ export default function GoogleMapView({
     }
   }
 
+  // 中心地のピン（ドラッグで移動可）
+  function syncPin() {
+    const maps = window.google?.maps;
+    if (!maps || !mapRef.current) return;
+    if (!pin) { pinRef.current?.setMap(null); pinRef.current = null; return; }
+    if (!pinRef.current) {
+      pinRef.current = new maps.Marker({ map: mapRef.current, position: pin, draggable: true, zIndex: 20, title: pinLabel || '中心地' });
+      pinRef.current.addListener('dragend', () => {
+        const p = pinRef.current.getPosition();
+        onPinChangeRef.current?.({ lat: p.lat(), lng: p.lng() });
+      });
+    } else {
+      pinRef.current.setPosition(pin);
+      pinRef.current.setTitle(pinLabel || '中心地');
+    }
+  }
+
   useEffect(() => { if (ready) syncPolygons(); /* eslint-disable-next-line */ }, [ready, polygons]);
+  useEffect(() => { if (ready) syncPin(); /* eslint-disable-next-line */ }, [ready, pin, pinLabel]);
   useEffect(() => { if (ready) syncMarkers(); /* eslint-disable-next-line */ }, [ready, points, competitors, polygons.length]);
   useEffect(() => { if (ready) syncCircles(); /* eslint-disable-next-line */ }, [ready, circles]);
 

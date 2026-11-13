@@ -46,7 +46,7 @@ ok('分割ポリゴンを1町丁目に統合（リング2つ）', kami?.polygons
 ok('分割片の世帯数は合算せず1,100', kami?.households === 1100, kami?.households);
 const koroku = towns.find((t) => t.code === '12207001001');
 ok('胡録台 世帯数 3,120', koroku?.households === 3120, koroku?.households);
-ok('胡録台 配布部数 = 3,120×70% = 2,184', koroku?.distribution === 2184, koroku?.distribution);
+ok('胡録台 配布部数 = ROUNDDOWN(3,120×70%,-1) = 2,180', koroku?.distribution === 2180, koroku?.distribution);
 ok('町名・市区町村名', koroku?.name === '胡録台' && koroku?.city === '松戸市', `${koroku?.name}/${koroku?.city}`);
 ok('重心が区画内', koroku && koroku.center.lng > 139.910 && koroku.center.lng < 139.914 && koroku.center.lat > 35.780 && koroku.center.lat < 35.783);
 ok('ダウンロードURLに市区町村コード', estatBoundaryUrls('12207')[0].includes('code=12207'));

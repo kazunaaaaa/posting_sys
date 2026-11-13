@@ -17,9 +17,9 @@ import {
   searchTables, getMeta, detectHouseholdCode, detectAreaClassId, detectLatestTime,
   fetchMunicipalityHouseholds,
 } from '../services/estatClient.js';
+import { distributionFor } from '../services/distribution.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_RATE = 0.7;
 
 const c = {
   ok: (s) => `\x1b[32m${s}\x1b[0m`,
@@ -121,7 +121,7 @@ async function main() {
   for (const [code, name] of SAMPLES) {
     const hhVal = households[code];
     if (hhVal != null) {
-      console.log(`    ${code} ${name}: 世帯 ${hhVal.toLocaleString()} → ${c.ok(Math.round(hhVal * DIST_RATE).toLocaleString() + '部')}`);
+      console.log(`    ${code} ${name}: 世帯 ${hhVal.toLocaleString()} → ${c.ok(distributionFor(hhVal).toLocaleString() + '部')}`);
     } else {
       console.log(`    ${code} ${name}: ${c.dim('該当なし（コード体系差の可能性）')}`);
     }

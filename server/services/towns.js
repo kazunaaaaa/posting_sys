@@ -13,11 +13,11 @@ import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
 import * as shapefile from 'shapefile';
 import { simplifyRing, centroid, areaKm2 } from './geo.js';
+import { DISTRIBUTION_RATE, distributionFor } from './distribution.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOWN_DIR = path.join(__dirname, '..', 'data', 'towns');
 const RAW_DIR = path.join(TOWN_DIR, 'raw');
-const DIST_RATE = 0.7;
 const TOLERANCE = Number(process.env.TOWN_SIMPLIFY ?? 0.00006); // 約6m
 
 // e-Stat 境界データのダウンロードURL候補（測地系の指定違いを順に試す）
@@ -115,8 +115,8 @@ export function normalizeTowns(features, cityCode) {
       name: String(g.props.S_NAME || '').trim() || key,
       households,
       population: g.jinko,
-      distribution: households == null ? null : Math.round(households * DIST_RATE),
-      distributionRate: DIST_RATE,
+      distribution: distributionFor(households),
+      distributionRate: DISTRIBUTION_RATE,
       center: centroid(main),
       areaKm2: +km2.toFixed(4),
       householdDensity: households != null && km2 > 0 ? Math.round(households / km2) : null,

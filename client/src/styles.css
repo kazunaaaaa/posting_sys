@@ -140,3 +140,31 @@ body {
 .citychips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .municheck .chip { padding: 3px 10px; font-size: 11px; }
 .municheck .chip:disabled { opacity: .55; cursor: default; }
+
+/* ツールバー2段目（円選択・部数追加） */
+.maptoolbar.sub { padding-top: 6px; padding-bottom: 6px; background: #fafbfc; }
+.countctl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-left: 8px; }
+.countctl select { padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; background: #fff; }
+.chip.red { background: #ef1c1c; color: #fff; border-color: #ef1c1c; }
+.chip.red:hover { background: #d81414; }
+.chip .link { color: #0e7fb5; }
+.countmsg { white-space: pre-wrap; color: #9a3412; }
+.circlechip { background: #fee2e2; color: #b91c1c; }
+.circlechip button { color: #b91c1c; }
+
+/* 選択中エリア（市区町村ごと） */
+.selhead { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); padding: 2px 2px 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.selhead span:first-child { font-size: 18px; font-weight: 800; color: #ea580c; }
+.selgroup { margin-bottom: 12px; }
+.selgroup-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; padding: 6px 2px; color: #374151; }
+.selgroup-head span { font-size: 12px; color: var(--muted); }
+.selrow { display: flex; align-items: center; gap: 6px; padding: 5px 4px; border-bottom: 1px dashed #eef0f2; font-size: 13px; }
+.selrow .selname { flex: 1; }
+.selrow .selcopies { color: var(--muted); font-size: 12px; }
+.selx { border: none; background: transparent; color: #9ca3af; font-size: 15px; cursor: pointer; padding: 0 4px; }
+.selx:hover { color: #ef1c1c; }
+.linkbtn { display: block; width: 100%; margin-top: 6px; border: none; background: transparent; color: #6b7280; font-size: 12px; cursor: pointer; text-align: center; padding: 4px; }
+.linkbtn:hover { text-decoration: underline; }
+.linkbtn.danger { color: #ea580c; font-weight: 700; margin-top: 4px; }
+.okbox { white-space: pre-wrap; font-size: 12px; line-height: 1.6; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.field input { width: 100%; }
