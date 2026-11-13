@@ -58,6 +58,7 @@ export default function App() {
 
   // ターゲット属性（業態を選ぶと標準値が入る。自由に変更可）
   const [profile, setProfile] = useState({ ageMin: '', ageMax: '', sex: 'all' });
+  const [incomePref, setIncomePref] = useState(''); // '' | 'high' | 'low'
   // AI最適エリアの結果と、地図に描く分断線（川・道路・線路）
   const [optResult, setOptResult] = useState(null);
   const [barriers, setBarriers] = useState([]);
@@ -176,6 +177,7 @@ export default function App() {
     return Object.fromEntries(analysis.scoring.areas.map((a) => [a.code, a.score]));
   }, [analysis]);
   const bestCode = analysis?.scoring?.best?.code;
+  const hasIncomeCol = !!analysis?.scoring?.areas?.some((a) => a.incomeLevel && a.incomeLevel !== '—');
   const businessIcon = businessTypes.find((b) => b.id === businessTypeId)?.icon;
 
   async function toggle(code) {
@@ -346,13 +348,13 @@ export default function App() {
       setCountMsg('🤖 ターゲットの多さ・川や道路の分断を考慮して、最適エリアを作成中…（初回は道路・人口データの取得に少しかかります）');
       const r = await api.optimizeArea({
         pin: p, targetCopies: target, cityCodes: townCitiesRef.current.map((c) => c.code),
-        businessTypeId: businessTypeId || null, profile: profilePayload(),
+        businessTypeId: businessTypeId || null, profile: profilePayload(), incomePref: incomePref || null,
       });
       if (!r.codes?.length) { setCountMsg('最適エリアを作成できませんでした（候補の町丁目がありません）'); return; }
       setSelected(r.codes);
       setCircles([]);
       setBarriers(r.barriers || []);
-      setOptResult({ ...r, failed: [...failed] });
+      setOptResult({ ...r, failed: [...failed], center: { ...p } });
       setCountMsg(`🤖 最適エリアを作成しました: 約${target.toLocaleString()}部 → ${r.sum.toLocaleString()}部（${r.codes.length}エリア・半径約${r.maxDistanceKm}km）`);
       await runAnalysis(r.codes);
     } catch (e) {
@@ -392,6 +394,28 @@ export default function App() {
     }
   }
 
+  // ---- Excel「AI分析レポート」シートの内容 ----
+  function buildReport(rep, opt) {
+    const bt = businessTypes.find((b) => b.id === businessTypeId);
+    const c = opt?.center || pin;
+    return {
+      generatedAt: new Date().toISOString(),
+      conditions: {
+        businessType: bt ? bt.label : null,
+        target: rep.scoring?.targetProfile?.label || (mode === 'town' ? profileLabel(profile) : null),
+        incomePref: rep.incomePref || null,
+        targetCopies: opt?.targetCopies || null,
+        center: c ? `${storeName ? storeName + '　' : ''}緯度 ${c.lat.toFixed(5)} / 経度 ${c.lng.toFixed(5)}` : storeName || null,
+      },
+      analysis: { scoring: rep.scoring, explanation: rep.explanation, quotes: { companyTotals: (rep.quotes?.companyTotals || []).filter((t) => t.quote > 0) } },
+      optimize: opt ? {
+        sum: opt.sum, targetCopies: opt.targetCopies, areaCount: opt.codes.length, maxDistanceKm: opt.maxDistanceKm,
+        targetTotal: opt.targetTotal, incomeIndex: opt.incomeIndex, incomePref: opt.incomePref, islands: opt.islands,
+        skippedByBarrier: opt.skippedByBarrier, crossedBarriers: opt.crossedBarriers, barrierError: opt.barrierError,
+      } : null,
+    };
+  }
+
   // ---- 配布部数表（Excel）ダウンロード ----
   async function downloadAreaTable() {
     if (!selectedAreas.length) return;
@@ -417,8 +441,18 @@ export default function App() {
         console.warn('map image failed', e);
       }
 
+      // AI分析レポート（別シート）: 選択が分析時から変わっていれば分析し直す
+      let rep = analysis;
+      const sameSet = (a, b) => a && b && a.length === b.length && a.every((c) => b.includes(c));
+      if (!rep || !sameSet(rep.codes, selected)) {
+        setExportMsg('AI分析を実行中…（レポート用）');
+        try { rep = await runAnalysis(selected); } catch (e) { console.warn('analysis for report failed', e); rep = null; }
+      }
+      const report = rep ? buildReport(rep, sameSet(optResult?.codes, selected) ? optResult : null) : null;
+
       setExportMsg('Excelを作成中…');
       const { blob, filename } = await api.exportAreaXlsx({
+        report,
         rows,
         coverRate: rate,
         storeName,
@@ -432,7 +466,7 @@ export default function App() {
       a.href = url; a.download = filename;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setExportMsg(`✅ ${filename} をダウンロードしました`
+      setExportMsg(`✅ ${filename} をダウンロードしました${report ? '（シート「AI分析レポート」付き）' : ''}`
         + (!map ? '\n※ 地図画像を作成できませんでした' : !map.baseMap ? `\n※ 背景の地図を取得できなかったため、背景なしの地図を貼り付けました。\n原因: ${map.baseError || '不明'}` : ''));
     } catch (e) {
       setExportMsg(`出力に失敗しました: ${e.message}`);
@@ -460,8 +494,10 @@ export default function App() {
         const r = await api.searchCompetitors(businessTypeId, codes, mode);
         comps = r.competitors; setCompetitors(comps); setCompetitorSource(r.source);
       }
-      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload());
-      setAnalysis(res);
+      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload(), incomePref);
+      const withCodes = { ...res, codes: [...codes], incomePref };
+      setAnalysis(withCodes);
+      return withCodes;
     } finally { setLoading((l) => ({ ...l, analyze: false })); }
   }
 
@@ -615,7 +651,15 @@ export default function App() {
                   <option value="male">男性</option>
                 </select>
               </div>
-              <div className="hint">業態を選ぶと標準のターゲットが入ります（自由に変更可）。町丁目ごとのターゲット人数は国勢調査の年齢・男女別人口から計算します。</div>
+              <div className="targetrow">
+                所得層
+                <select value={incomePref} onChange={(e) => { setIncomePref(e.target.value); setAnalysis(null); }}>
+                  <option value="">指定なし</option>
+                  <option value="high">高め</option>
+                  <option value="low">低め</option>
+                </select>
+              </div>
+              <div className="hint">業態を選ぶと標準のターゲットが入ります（自由に変更可）。町丁目ごとのターゲット人数は国勢調査の年齢・男女別人口から計算します。所得層は市区町村の平均所得（実データ）と町丁目の所得指数（推計）で評価します。</div>
             </div>
             <button className="btn ghost" disabled={!businessTypeId || !selected.length || loading.comp} onClick={loadCompetitors}>
               {loading.comp ? '検索中…' : '競合をプロット'}
@@ -723,10 +767,14 @@ export default function App() {
                   <div>🎯 {optResult.profile?.label}: 約<b>{optResult.targetTotal.toLocaleString()}</b>人
                     <span>{optResult.targetSource === 'census' ? '（国勢調査）' : optResult.targetSource === 'mixed' ? '（一部推計）' : '（全国の年齢構成による推計）'}</span></div>
                 )}
+                {optResult.incomeIndex != null && (
+                  <div>💴 所得指数 <b>{optResult.incomeIndex.toFixed(2)}</b><span>（推計・市区町村平均=1.00、{optResult.incomePref === 'low' ? '低め' : '高め'}を優先）</span></div>
+                )}
               </div>
               <ul className="optnotes">
                 <li>ピンのある町丁目から、隣り合う町丁目へ順に広げました（飛び地なし{optResult.islands ? `／やむを得ず${optResult.islands}か所` : ''}）</li>
                 <li>ターゲットの多い町丁目を優先し、川・高速道路・国道・線路をまたぐ町丁目は後回しにしました</li>
+                {optResult.incomePref && optResult.incomeIndex == null && <li className="warn">所得指数を取得できなかったため、所得層は考慮していません{optResult.incomeErrors?.[0] ? `（${optResult.incomeErrors[0]}）` : ''}</li>}
                 {optResult.skippedByBarrier?.length > 0 && (
                   <li>分断のため除外した近くの町丁目: {optResult.skippedByBarrier.slice(0, 6).map((x) => `${townLabel(x.name)}（${x.barriers.slice(0, 2).join('・')}の向こう側）`).join('、')}</li>
                 )}
@@ -808,13 +856,37 @@ export default function App() {
                       </table>
                     </>
                   )}
+                  {(analysis.scoring.income?.municipal?.length > 0 || analysis.scoring.incomeRanking?.length > 0) && (
+                    <>
+                      <h4 className="subhead">💴 所得{analysis.scoring.incomePref ? `（${analysis.scoring.incomePref === 'high' ? '高め' : '低め'}を優先）` : ''}</h4>
+                      {analysis.scoring.income?.municipal?.map((m) => (
+                        <div key={m.code} className="kv"><span>{m.city} 平均所得<small>（納税者1人あたり・{m.year}年・実データ）</small></span><span>約{Math.round(m.avgIncomeYen / 10000).toLocaleString()}万円</span></div>
+                      ))}
+                      {analysis.scoring.income?.estimated && analysis.scoring.incomeRanking?.length > 0 && (
+                        <table className="ranktable">
+                          <thead><tr><th>順</th><th>エリア</th><th>所得指数</th><th>水準</th></tr></thead>
+                          <tbody>
+                            {analysis.scoring.incomeRanking.slice(0, 5).map((a, i) => (
+                              <tr key={a.code} className={i === 0 ? 'top' : ''}><td>{i + 1}</td><td>{townLabel(a.name)}</td><td>{a.incomeIndex.toFixed(2)}</td><td>{a.incomeLevel}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                      <div className="hint">所得指数は推計（管理職・専門職の割合、持ち家率、夫婦と子どもの世帯・単身世帯の割合から、市区町村平均=1.00で算出）。金額ではありません。</div>
+                    </>
+                  )}
+                  {analysis.scoring.income?.errors?.length > 0 && !analysis.scoring.income?.municipal?.length && !analysis.scoring.incomeRanking?.length && (
+                    <div className="hint warn">所得データを取得できませんでした（{analysis.scoring.income.errors[0]}）</div>
+                  )}
                   <h4 className="subhead">総合スコア</h4>
                   <table className="ranktable">
-                    <thead><tr><th>順位</th><th>エリア</th><th>点</th><th>ターゲット</th><th>競合</th></tr></thead>
+                    <thead><tr><th>順位</th><th>エリア</th><th>点</th><th>ターゲット</th>{hasIncomeCol && <th>所得</th>}<th>競合</th></tr></thead>
                     <tbody>
                       {analysis.scoring.areas.map((a, i) => (
                         <tr key={a.code} className={a.code === bestCode ? 'top' : ''}>
-                          <td>{i + 1}</td><td>{townLabel(a.name)}</td><td>{a.score}</td><td>{a.target != null ? a.target.toLocaleString() : '—'}</td><td>{a.competitorCount}</td>
+                          <td>{i + 1}</td><td>{townLabel(a.name)}</td><td>{a.score}</td><td>{a.target != null ? a.target.toLocaleString() : '—'}</td>
+                          {hasIncomeCol && <td title={a.incomeIndex != null ? `所得指数 ${a.incomeIndex.toFixed(2)}` : ''}>{a.incomeLevel || '—'}</td>}
+                          <td>{a.competitorCount}</td>
                         </tr>
                       ))}
                     </tbody>

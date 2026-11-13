@@ -4,6 +4,7 @@
 //   - 隣接: 境界が接している町丁目どうし（大きな川は水面区画で隔てられるため隣接しない）
 //   - 分断: ピン→町丁目の中心が、川・高速道路・国道・線路をまたぐ数（重み付き）
 //   - ターゲット密度: 町丁目のターゲット比率 ÷ 候補全体の平均
+//   - 所得層（指定時）: 優先度 ÷ 所得指数^1.5（高め）／ × 所得指数^1.5（低め）
 import { pointInPolygon } from './geo.js';
 import { crossings, indexBarriers, BARRIER_TYPES } from './barriers.js';
 
@@ -85,8 +86,10 @@ export function buildAdjacency(towns, tolM = 12) {
  * @param {Record<string,{target:number,rate:number}>} [p.targets]
  * @param {Array} [p.barriers] parseOverpass の結果
  * @param {string[]} [p.excludeCodes] 使わない町丁目
+ * @param {Record<string,{index:number|null}>} [p.income] 町丁目の所得指数（平均=1）
+ * @param {'high'|'low'|null} [p.incomePref] 所得層の優先
  */
-export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barriers = [], excludeCodes = [] }) {
+export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barriers = [], excludeCodes = [], income = {}, incomePref = null }) {
   const target = Math.max(1, Number(targetCopies) || 0);
   const excluded = new Set(excludeCodes);
   const pool = towns
@@ -110,7 +113,10 @@ export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barri
     t.cross = c;
     const ti = avgRate && targets[t.code]?.rate ? Math.max(0.3, Math.min(3, targets[t.code].rate / avgRate)) : 1;
     t.targetIndex = ti;
-    t.cost = Math.max(0.05, t.d) * (1 + c.weight) / ti ** 0.6;
+    const ix = income[t.code]?.index;
+    t.incomeIndex = ix ?? null;
+    const fi = ix > 0 && (incomePref === 'high' || incomePref === 'low') ? Math.max(0.5, Math.min(2, incomePref === 'high' ? ix : 1 / ix)) : 1;
+    t.cost = Math.max(0.05, t.d) * (1 + c.weight) / ti ** 0.6 / fi ** 1.5;
   }
 
   const adj = buildAdjacency(cands);
@@ -173,6 +179,10 @@ export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barri
     .map((t) => ({ code: t.code, name: t.name, distanceKm: +t.d.toFixed(2), barriers: [...new Set(t.cross.names.length ? t.cross.names : t.cross.types.map((x) => BARRIER_TYPES[x].label))] }));
 
   const targetTotal = order.reduce((s, t) => s + (targets[t.code]?.target || 0), 0);
+  // 作成エリアの所得指数（部数で加重平均）
+  const withIx = order.filter((t) => t.incomeIndex > 0);
+  const wSum = withIx.reduce((s, t) => s + t.distribution, 0);
+  const incomeIndex = wSum ? +(withIx.reduce((s, t) => s + t.incomeIndex * t.distribution, 0) / wSum).toFixed(2) : null;
   return {
     codes: order.map((t) => t.code),
     sum,
@@ -180,6 +190,8 @@ export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barri
     startCode: start.code,
     maxDistanceKm: +maxD.toFixed(2),
     targetTotal,
+    incomeIndex,
+    incomePref: incomePref || null,
     islands,
     skippedByBarrier,
     crossedBarriers: [...new Set(order.flatMap((t) => t.cross.names.length ? t.cross.names : t.cross.types.map((x) => BARRIER_TYPES[x].label)))],

@@ -4,6 +4,7 @@ import { getBusinessType } from '../services/places.js';
 import { computeTargets, normalizeProfile } from '../services/demographics.js';
 import { fetchBarriers, BARRIER_TYPES } from '../services/barriers.js';
 import { buildOptimalArea } from '../services/optimizeArea.js';
+import { computeIncome } from '../services/income.js';
 
 const router = Router();
 
@@ -16,7 +17,7 @@ function distKm(a, b) {
 // POST /api/optimize/area { pin:{lat,lng}, targetCopies, cityCodes:[...], businessTypeId?, profile?, excludeCodes? }
 router.post('/area', async (req, res) => {
   try {
-    const { pin, targetCopies, cityCodes = [], businessTypeId, profile, excludeCodes = [] } = req.body ?? {};
+    const { pin, targetCopies, cityCodes = [], businessTypeId, profile, excludeCodes = [], incomePref = null } = req.body ?? {};
     if (!pin || !Number.isFinite(+pin.lat) || !Number.isFinite(+pin.lng)) return res.status(400).json({ error: 'pin が必要です' });
     if (!(+targetCopies > 0)) return res.status(400).json({ error: 'targetCopies が必要です' });
     if (!cityCodes.length) return res.status(400).json({ error: '町丁目を読み込んだ市区町村がありません' });
@@ -47,7 +48,16 @@ router.post('/area', async (req, res) => {
     const bbox = { minLat: p.lat - dLat, maxLat: p.lat + dLat, minLng: p.lng - dLng, maxLng: p.lng + dLng };
     const { barriers, error: barrierError } = await fetchBarriers(bbox);
 
-    const result = buildOptimalArea({ towns: near, pin: p, targetCopies: +targetCopies, targets: tg.byCode, barriers, excludeCodes });
+    // 所得層を指定したときだけ所得指数を取る（未取得の市区町村はe-Statから取得）
+    let inc = null;
+    if (incomePref === 'high' || incomePref === 'low') {
+      try { inc = await computeIncome(near); } catch (e) { inc = { byCode: {}, errors: [e.message] }; }
+    }
+
+    const result = buildOptimalArea({
+      towns: near, pin: p, targetCopies: +targetCopies, targets: tg.byCode, barriers, excludeCodes,
+      income: inc?.byCode || {}, incomePref: inc ? incomePref : null,
+    });
 
     // 地図表示用: 作成エリア周辺の分断線だけ返す
     const sel = near.filter((t) => result.codes.includes(t.code));
@@ -69,6 +79,8 @@ router.post('/area', async (req, res) => {
       profile: tg.profile,
       targetSource: tg.source,
       targetErrors: tg.errors.slice(0, 3),
+      incomeErrors: (inc?.errors || []).slice(0, 3),
+      incomeAvailable: inc ? Object.values(inc.byCode).some((v) => v.index != null) : null,
       perTown: Object.fromEntries(result.codes.map((c) => [c, tg.byCode[c]])),
       barriers: shown.map((b) => ({ type: b.type, name: b.name, label: BARRIER_TYPES[b.type].label, coords: b.coords })),
       barrierError: barrierError || null,

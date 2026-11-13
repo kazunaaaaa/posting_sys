@@ -247,3 +247,110 @@ export async function fetchTownAgeSex(appId, statsDataId, cityCode) {
   }
   return { towns: result, meta: { statsDataId, sexClass: sex.classId, ageClass: age.classId, bands: age.bands.length, timeCode, areaCount: Object.keys(result).length } };
 }
+
+// ======================================================================
+// 市区町村の平均所得（実データ）
+//   社会・人口統計体系 市区町村データ（C 経済基盤）
+//   課税対象所得(C120110, 千円) ÷ 納税義務者数（所得割）(C120120, 人)
+// ======================================================================
+export const MUNICIPAL_ECON_TABLES = ['0000020203'];
+const isIncome = (c) => /C120110|課税対象所得/.test(`${c['@code']} ${c['@name']}`);
+const isTaxpayers = (c) => /C120120|納税義務者数/.test(`${c['@code']} ${c['@name']}`);
+
+export async function findMunicipalIncomeTable(appId) {
+  const ids = [...MUNICIPAL_ECON_TABLES];
+  try {
+    const json = await call('getStatsList', { appId, statsCode: '00200502', searchWord: '課税対象所得', limit: 50 });
+    checkResult(json, 'GET_STATS_LIST');
+    for (const t of asArray(json.GET_STATS_LIST?.DATALIST_INF?.TABLE_INF)) if (!ids.includes(t['@id'])) ids.push(t['@id']);
+  } catch { /* 既定の表で試す */ }
+  for (const id of ids) {
+    try {
+      const objs = await getMeta(appId, id);
+      for (const o of objs) {
+        const inc = o.classes.find(isIncome), tax = o.classes.find(isTaxpayers);
+        if (inc && tax) return { id, classId: o.id, incomeCode: inc['@code'], taxpayerCode: tax['@code'] };
+      }
+    } catch { /* 次の候補 */ }
+  }
+  throw new Error('「課税対象所得」「納税義務者数」を含む統計表が見つかりません');
+}
+
+/** 市区町村の納税者1人あたり平均所得（円）と年 */
+export async function fetchMunicipalIncome(appId, table, cityCode) {
+  const json = await call('getStatsData', {
+    appId, statsDataId: table.id, cdArea: cityCode, [cdParam(table.classId)]: `${table.incomeCode},${table.taxpayerCode}`,
+    metaGetFlg: 'N', cntGetFlg: 'N', limit: 1000,
+  });
+  checkResult(json, 'GET_STATS_DATA');
+  const byTime = {};
+  for (const v of asArray(json.GET_STATS_DATA?.STATISTICAL_DATA?.DATA_INF?.VALUE)) {
+    const n = Number(String(v.$).replace(/,/g, ''));
+    if (!Number.isFinite(n)) continue;
+    const t = (byTime[v['@time']] ??= {});
+    if (v['@' + table.classId] === table.incomeCode) t.income = n;
+    if (v['@' + table.classId] === table.taxpayerCode) t.taxpayers = n;
+  }
+  const times = Object.keys(byTime).filter((t) => byTime[t].income && byTime[t].taxpayers).sort();
+  if (!times.length) return null;
+  const latest = byTime[times[times.length - 1]];
+  return { avgIncomeYen: Math.round((latest.income * 1000) / latest.taxpayers), year: times[times.length - 1].slice(0, 4), taxpayers: latest.taxpayers };
+}
+
+// ======================================================================
+// 小地域（町丁目）の割合データ（持ち家率・世帯の家族類型・職業など）
+//   対象の分類で「分子にあたる区分」と「総数」を取り、他の分類は総数に固定する。
+// ======================================================================
+// 区分名の先頭の符号（「A 管理的職業従事者」「1_持ち家」「(1) 単独世帯」など）を除く
+export function cleanClassName(name) {
+  return String(name ?? '').trim().replace(/^[（(]?[A-Za-zＡ-Ｚ0-9０-９]{1,4}[)）]?[\s_.．:：・　]+/, '').trim();
+}
+
+export async function fetchSmallAreaShare(appId, statsDataId, cityCode, { numerator, total = /^総数/ }) {
+  const nums = Array.isArray(numerator) ? numerator : [numerator];
+  const classObjs = await getMeta(appId, statsDataId);
+  const nameOf = (c) => cleanClassName(c['@name']);
+  const target = classObjs.find((o) => o.id !== 'area' && o.id !== 'time' && o.classes.some((c) => nums.some((r) => r.test(nameOf(c)))));
+  if (!target) throw new Error(`統計表 ${statsDataId} に該当する区分がありません（${nums.map(String).join(', ')}）`);
+  const numCodes = target.classes.filter((c) => nums.some((r) => r.test(nameOf(c)))).map((c) => c['@code']);
+  const totalClass = target.classes.find((c) => total.test(nameOf(c)));
+  const sumAll = !totalClass; // 総数が無い表は、再掲以外の全区分の合計を分母にする
+  const totalCodes = totalClass ? [totalClass['@code']] : target.classes.filter((c) => !/再掲/.test(c['@name'])).map((c) => c['@code']);
+
+  const params = { appId, statsDataId, metaGetFlg: 'N', cntGetFlg: 'N', limit: 100000 };
+  params[cdParam(target.id)] = [...new Set([...numCodes, ...totalCodes])].join(',');
+  for (const o of classObjs) {
+    if (o === target || o.id === 'area' || o.id === 'time') continue;
+    const pick = (o.id === 'tab' && o.classes.find((c) => /世帯|人数|人口|就業者/.test(c['@name'])))
+      || o.classes.find((c) => /総数|合計/.test(c['@name'])) || o.classes[0];
+    if (pick) params[cdParam(o.id)] = pick['@code'];
+  }
+  const areaObj = classObjs.find((o) => o.id === 'area');
+  const areaCodes = (areaObj?.classes || []).map((c) => String(c['@code'])).filter((c) => c.startsWith(cityCode)).sort();
+  if (areaCodes.length) { params.cdAreaFrom = areaCodes[0]; params.cdAreaTo = areaCodes[areaCodes.length - 1]; }
+  const timeCode = detectLatestTime(classObjs);
+  if (timeCode) params.cdTime = timeCode;
+
+  const acc = {};
+  let start = null;
+  for (let page = 0; page < 30; page++) {
+    const json = await call('getStatsData', start ? { ...params, startPosition: start } : params);
+    checkResult(json, 'GET_STATS_DATA');
+    const sd = json.GET_STATS_DATA?.STATISTICAL_DATA;
+    for (const v of asArray(sd?.DATA_INF?.VALUE)) {
+      const area = String(v['@area'] ?? '');
+      if (!area.startsWith(cityCode)) continue;
+      const n = Number(String(v.$).replace(/,/g, ''));
+      const val = Number.isFinite(n) ? n : 0;
+      const code = v['@' + target.id];
+      const a = (acc[area] ??= { num: 0, total: 0 });
+      if (numCodes.includes(code)) a.num += val;
+      if (totalCodes.includes(code)) a.total += val;
+    }
+    start = sd?.RESULT_INF?.NEXT_KEY;
+    if (!start) break;
+  }
+  const shares = {};
+  for (const [area, a] of Object.entries(acc)) if (a.total > 0) shares[area] = a.num / a.total;
+  return { shares, meta: { statsDataId, classId: target.id, numerator: numCodes, total: totalCodes.length } };
+}

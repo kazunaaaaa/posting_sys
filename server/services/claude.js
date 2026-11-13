@@ -30,6 +30,14 @@ function ruleBasedExplanation(scoring, businessTypeLabel) {
         `。選択エリア全体で約${(totals.target || 0).toLocaleString()}人に届く見込みです。`
     );
   }
+  if (scoring.income?.municipal?.length || scoring.incomeRanking?.length) {
+    const mu = (scoring.income?.municipal || []).map((m) => `${m.city} 約${Math.round(m.avgIncomeYen / 10000)}万円（${m.year}年）`).join('・');
+    const pref = scoring.incomePref === 'high' ? '所得が高めの地域を優先して評価しました。' : scoring.incomePref === 'low' ? '所得が低めの地域を優先して評価しました。' : '';
+    const rk = scoring.incomeRanking?.length && scoring.income?.estimated
+      ? `所得指数（推計・市区町村平均=1.00）が${scoring.incomePref === 'low' ? '低い' : '高い'}エリア: ` + scoring.incomeRanking.slice(0, 3).map((a) => `${a.name} ${a.incomeIndex.toFixed(2)}（${a.incomeLevel}）`).join(' / ') + '。'
+      : '';
+    lines.push(`【所得】${mu ? `納税者1人あたり平均所得: ${mu}。` : ''}${rk}${pref}`);
+  }
   lines.push(
     `上位候補: ${top3.map((a) => `${a.name}(${a.score})`).join(' / ')}。` +
       `選択中エリア合計は世帯 ${totals.households.toLocaleString()}・配布 ${totals.distribution.toLocaleString()}部・想定コスト 約${totals.estimatedCost.toLocaleString()}円です。`
@@ -53,6 +61,7 @@ ${JSON.stringify(scoring, null, 2)}
 このデータを踏まえ、日本語で次を簡潔に述べてください:
 1. 最も配布に適したエリアはどこか、その理由（世帯規模・ターゲット人数・競合密度・配布効率の観点）
    ターゲット人数（target / targetRate / targetPerCopy・targetRanking）がある場合は、ターゲットが多いエリアを必ず挙げること
+   所得（income.municipal は実データの平均所得、incomeIndex は町丁目の推計指数で市区町村平均=1.00、incomePref は優先する所得層）がある場合は触れること。所得指数は推計である旨を添え、金額に換算しないこと
 2. 逆に優先度を下げるべきエリアと理由
 3. 予算配分の提案（上位エリアへの傾斜配分の考え方）
 箇条書き中心で、合計300〜400字程度。数値は与えられたデータのみ使用すること。`;

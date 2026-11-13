@@ -8,10 +8,11 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "estat:check": "node scripts/estat-check.mjs",
-    "test": "node test/estatClient.test.mjs && node test/towns.test.mjs && node test/exportArea.test.mjs && node test/optimize.test.mjs",
+    "test": "node test/estatClient.test.mjs && node test/towns.test.mjs && node test/exportArea.test.mjs && node test/optimize.test.mjs && node test/income.test.mjs",
     "towns:fetch": "node scripts/towns-fetch.mjs",
     "towns:prefetch": "node scripts/towns-prefetch.mjs",
-    "demographics:check": "node scripts/demographics-check.mjs"
+    "demographics:check": "node scripts/demographics-check.mjs",
+    "income:check": "node scripts/income-check.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",

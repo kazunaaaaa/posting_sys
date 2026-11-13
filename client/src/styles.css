@@ -188,3 +188,5 @@ body {
 .optnotes li.warn { color: #b45309; }
 .subhead { font-size: 12px; margin: 14px 0 4px; color: #374151; }
 .subhead span { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 11px; }
+.kv small { font-size: 10px; color: var(--muted); margin-left: 2px; }
+.hint.warn { color: #b45309; }
