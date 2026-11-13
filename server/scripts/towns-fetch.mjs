@@ -3,7 +3,8 @@
 //   npm --prefix server run towns:fetch -- 12207        # 松戸市
 //   npm --prefix server run towns:fetch -- 12207 12217  # 複数可
 import '../loadEnv.js';
-import { getTowns } from '../services/towns.js';
+import path from 'path';
+import { getTowns, RAW_DIR } from '../services/towns.js';
 
 const codes = process.argv.slice(2);
 if (!codes.length) {
@@ -29,7 +30,7 @@ for (const code of codes) {
     failed++;
     console.log('失敗');
     console.log(`  ${e.message}`);
-    console.log(`  → 手動の場合: e-Statの境界データ(小地域/シェープ/緯度経度)をダウンロードし server/data/towns/raw/${code}.zip に置いて再実行`);
+    console.log(`  → 手動の場合: e-Statの境界データ(小地域/シェープ/緯度経度)をダウンロードし ${path.join(RAW_DIR, `${code}.zip`)} に置いて再実行`);
   }
 }
 process.exit(failed ? 1 : 0);

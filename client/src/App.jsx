@@ -23,6 +23,7 @@ export default function App() {
   const [townPrefMunis, setTownPrefMunis] = useState([]);
   const [townKeyword, setTownKeyword] = useState('');
   const [townErr, setTownErr] = useState('');
+  const [townStatus, setTownStatus] = useState(null); // 取得済み市区町村数
   // 市区町村モード
   const [prefectures, setPrefectures] = useState([]);
   const [pref, setPref] = useState('');
@@ -71,6 +72,7 @@ export default function App() {
     api.config().then(setConfig);
     api.businessTypes().then((d) => setBusinessTypes(d.categories));
     api.prefectures().then((d) => setPrefectures(d.prefectures));
+    api.townsStatus().then(setTownStatus).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -481,6 +483,10 @@ export default function App() {
                       })}
                   </div>
                 </>
+              )}
+              {townStatus && (
+                <div className="hint">📦 取得済みデータ: {townStatus.cachedCities}市区町村
+                  {townStatus.cachedCities < 50 && '（一都三県などを事前取得すると、検索がすぐ表示されます）'}</div>
               )}
               {loading.town && <div className="hint">⏳ {loading.town}の町丁目を取得中…（初回は数秒）</div>}
               {townErr && <div className="errbox">{townErr}</div>}

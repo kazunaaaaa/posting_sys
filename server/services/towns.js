@@ -4,10 +4,14 @@
 // 実際の町丁目境界ポリゴン + 世帯数(SETAI) + 人口(JINKO) に変換してキャッシュする。
 //
 // 取得の優先順:
-//   1) キャッシュ          server/data/towns/<市区町村コード>.json
-//   2) 手動配置のZIP        server/data/towns/raw/<市区町村コード>.zip
+//   1) キャッシュ          <キャッシュ>/<市区町村コード>.json
+//   2) 手動配置のZIP        <キャッシュ>/raw/<市区町村コード>.zip
 //   3) e-Stat から自動ダウンロード（e-Statへ接続できる環境で動作）
+//
+// キャッシュの場所: TOWN_CACHE_DIR、未設定なら ~/.posting-sys/towns
+//   （プロジェクトの外に置くことで、コードを入れ替えても取得済みデータが残る）
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
@@ -16,8 +20,10 @@ import { simplifyRing, centroid, areaKm2 } from './geo.js';
 import { DISTRIBUTION_RATE, distributionFor } from './distribution.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TOWN_DIR = path.join(__dirname, '..', 'data', 'towns');
-const RAW_DIR = path.join(TOWN_DIR, 'raw');
+export const TOWN_DIR = process.env.TOWN_CACHE_DIR || path.join(os.homedir(), '.posting-sys', 'towns');
+export const RAW_DIR = path.join(TOWN_DIR, 'raw');
+// 以前の保存先（プロジェクト内）。残っていれば読み込みに使う
+const LEGACY_DIR = path.join(__dirname, '..', 'data', 'towns');
 const TOLERANCE = Number(process.env.TOWN_SIMPLIFY ?? 0.00006); // 約6m
 
 // e-Stat 境界データのダウンロードURL候補（測地系の指定違いを順に試す）
@@ -33,18 +39,25 @@ function ensureDirs() {
 
 const memo = new Map();
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function downloadZip(cityCode) {
   const errors = [];
   for (const url of estatBoundaryUrls(cityCode)) {
-    try {
-      const res = await fetch(url, { headers: { 'User-Agent': 'posting-sys/0.1' } });
-      if (!res.ok) { errors.push(`HTTP ${res.status}`); continue; }
-      const buf = Buffer.from(await res.arrayBuffer());
-      // ZIP のシグネチャ(PK)を確認。HTMLのエラーページ等を弾く。
-      if (buf[0] !== 0x50 || buf[1] !== 0x4b) { errors.push('ZIP以外の応答'); continue; }
-      return buf;
-    } catch (e) {
-      errors.push(e.message);
+    // 一時的なエラー（通信エラー・429・5xx）は時間をあけて最大3回まで再試行
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(url, { headers: { 'User-Agent': 'posting-sys/0.1' }, signal: AbortSignal.timeout(60000) });
+        if (res.status === 429 || res.status >= 500) throw Object.assign(new Error(`HTTP ${res.status}`), { retry: true });
+        if (!res.ok) { errors.push(`HTTP ${res.status}`); break; }
+        const buf = Buffer.from(await res.arrayBuffer());
+        // ZIP のシグネチャ(PK)を確認。HTMLのエラーページ等を弾く。
+        if (buf[0] !== 0x50 || buf[1] !== 0x4b) { errors.push('ZIP以外の応答'); break; }
+        return buf;
+      } catch (e) {
+        if (attempt === 3) { errors.push(e.message); break; }
+        await sleep(1500 * attempt);
+      }
     }
   }
   throw new Error(`e-Statから境界データを取得できません (${errors.join(', ')})`);
@@ -133,12 +146,16 @@ export async function getTowns(cityCode) {
   if (memo.has(cityCode)) return memo.get(cityCode);
   ensureDirs();
   const cachePath = path.join(TOWN_DIR, `${cityCode}.json`);
-  if (fs.existsSync(cachePath)) {
-    const data = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
-    memo.set(cityCode, data);
-    return data;
+  const legacyCache = path.join(LEGACY_DIR, `${cityCode}.json`);
+  for (const p of [cachePath, legacyCache]) {
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      memo.set(cityCode, data);
+      return data;
+    }
   }
-  const rawPath = path.join(RAW_DIR, `${cityCode}.zip`);
+  const legacyRaw = path.join(LEGACY_DIR, 'raw', `${cityCode}.zip`);
+  const rawPath = fs.existsSync(legacyRaw) ? legacyRaw : path.join(RAW_DIR, `${cityCode}.zip`);
   const source = fs.existsSync(rawPath) ? 'manual-zip' : 'e-stat';
   const zipBuf = source === 'manual-zip' ? fs.readFileSync(rawPath) : await downloadZip(cityCode);
   const towns = normalizeTowns(await readShapefileZip(zipBuf), cityCode);
@@ -153,6 +170,21 @@ export async function getTowns(cityCode) {
   fs.writeFileSync(cachePath, JSON.stringify(data));
   memo.set(cityCode, data);
   return data;
+}
+
+// 取得済み（キャッシュ済み）の市区町村コード
+export function cachedCityCodes() {
+  const codes = new Set();
+  for (const dir of [TOWN_DIR, LEGACY_DIR]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) { const m = f.match(/^(\d{5})\.json$/); if (m) codes.add(m[1]); }
+  }
+  return codes;
+}
+
+// メモリ上の読込済みデータを捨てる（大量の事前取得で使用）
+export function forgetTowns(cityCode) {
+  memo.delete(cityCode);
 }
 
 // KEY_CODE は先頭5桁が市区町村コード

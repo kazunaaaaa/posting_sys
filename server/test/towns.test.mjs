@@ -2,12 +2,15 @@
 // e-Statと同形式の模擬シェープファイル(Shift_JIS dbf)をメモリ上で生成し、
 // ZIP展開 → 読込 → KEY_CODE統合 → 世帯数/部数算出 → キャッシュ までを検証する。
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { rect, makeEstatZip } from './helpers/shpWriter.mjs';
-import { readShapefileZip, normalizeTowns, getTowns, getTownsByCodes, estatBoundaryUrls } from '../services/towns.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// キャッシュは一時フォルダに（ホームフォルダのキャッシュを汚さない）
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'towns-test-'));
+process.env.TOWN_CACHE_DIR = tmpDir;
+const { readShapefileZip, normalizeTowns, getTowns, getTownsByCodes, estatBoundaryUrls, cachedCityCodes, TOWN_DIR } =
+  await import('../services/towns.js');
 
 const base = { PREF_NAME: '千葉県', CITY_NAME: '松戸市' };
 const ROWS = [
@@ -52,9 +55,9 @@ ok('重心が区画内', koroku && koroku.center.lng > 139.910 && koroku.center.
 ok('ダウンロードURLに市区町村コード', estatBoundaryUrls('12207')[0].includes('code=12207'));
 
 // 3) 手動配置ZIP → getTowns → キャッシュ（テスト用コード 99999 を使用し後始末）
-const townDir = path.join(__dirname, '..', 'data', 'towns');
-const rawZip = path.join(townDir, 'raw', '99999.zip');
-const cache = path.join(townDir, '99999.json');
+const rawZip = path.join(TOWN_DIR, 'raw', '99999.zip');
+const cache = path.join(TOWN_DIR, '99999.json');
+ok('キャッシュ先は TOWN_CACHE_DIR', TOWN_DIR === tmpDir, TOWN_DIR);
 fs.mkdirSync(path.dirname(rawZip), { recursive: true });
 fs.writeFileSync(rawZip, makeZip());
 try {
@@ -64,9 +67,11 @@ try {
   const picked = await getTownsByCodes(['99999'.slice(0, 5) + '0'.repeat(0)]);
   ok('getTownsByCodes(該当なしコード)は空', picked.length === 0, picked.length);
 } finally {
+  ok('取得済み一覧に含まれる', cachedCityCodes().has('99999'));
   fs.rmSync(rawZip, { force: true });
   fs.rmSync(cache, { force: true });
 }
 
+fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAIL'}  (${pass} passed, ${fail} failed)`);
 process.exit(fail === 0 ? 0 : 1);

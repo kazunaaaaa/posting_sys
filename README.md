@@ -82,13 +82,25 @@ npm run build && npm start
   未設定でも、背景なし（エリア・円・ピンのみ）の地図で出力できます。
 - Googleスプレッドシートで使う場合は、ダウンロードしたファイルをGoogleドライブにアップロードして開いてください（式も保持されます）。
 
+### 町丁目データの一括事前取得（一都三県・全国）
+初回だけまとめて取得しておくと、どの地域を検索してもすぐに町丁目が表示されます。
+```bash
+npm --prefix server run towns:prefetch -- 一都三県      # 251市区町村・約3〜5分
+npm --prefix server run towns:prefetch -- 全国          # 1,896市区町村・約30〜40分
+npm --prefix server run towns:prefetch -- 東京 神奈川    # 都道府県名やコード(13)でも指定可
+```
+- 取得済みはスキップするので、途中で止めても（Ctrl+C）同じコマンドで続きから再開できます。失敗した分も再実行で取り直します。
+- オプション: `--dry-run`（対象件数と見込み時間だけ表示）、`--concurrency=3`（同時取得数・最大5）、`--force`（取り直し）、`--only=14213,14153`（指定コードのみ）
+- 保存先は **`~/.posting-sys/towns`**（環境変数 `TOWN_CACHE_DIR` で変更可）。プロジェクトの外にあるので、コードを更新・入れ替えてもデータは残ります。
+- 保存容量の目安は一都三県で数十MB、全国で数百MBです（実際の値は取得後に表示されます）。
+
 ### 町丁目データ（e-Stat 境界データ）
 - 町丁目モードで市区町村を「＋読込」すると、サーバーが e-Stat から **令和2年国勢調査 小地域（町丁・字等別）** の境界データ（シェープファイル）をダウンロードし、
-  町丁目ごとの **実境界ポリゴン・世帯数(SETAI)・人口(JINKO)** に変換して `server/data/towns/<市区町村コード>.json` にキャッシュします。
+  町丁目ごとの **実境界ポリゴン・世帯数(SETAI)・人口(JINKO)** に変換して `~/.posting-sys/towns/<市区町村コード>.json` にキャッシュします。
 - 事前取得・動作確認: `npm --prefix server run towns:fetch -- 12207`（複数コード可）
 - e-Statへ接続できない環境では、[e-Stat 境界データ](https://www.e-stat.go.jp/gis/statmap-search?type=2)から
   「国勢調査 → 2020年 → 小地域（町丁・字等別）→ 世界測地系緯度経度・Shapefile」を市区町村単位でダウンロードし、
-  `server/data/towns/raw/<市区町村コード>.zip` に置けば読み込まれます。
+  `~/.posting-sys/towns/raw/<市区町村コード>.zip` に置けば読み込まれます。
 - 分割された町丁目は1区画に統合（世帯数は重複計上しない）、水面調査区は除外します。
 
 ## アーキテクチャ
@@ -115,7 +127,6 @@ server/                     Node.js + Express API
 │   └── geo.js              内包判定・面積・重心・距離・簡略化(DP)
 └── data/
     ├── municipalities.json      全国市区町村マスタ（実データ）
-    ├── towns/                   町丁目データのキャッシュ（実行時生成）
     ├── business-types.json      業態マスタ
     ├── pricing.sample.json      配布会社 原価・見積サンプル
     └── boundaries/              取得済み境界のキャッシュ

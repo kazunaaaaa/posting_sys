@@ -17,6 +17,7 @@ export const api = {
   config: () => req('/config'),
   // 町丁目（e-Stat 小地域の実境界・世帯数）
   towns: (city) => req('/towns?city=' + encodeURIComponent(city)),
+  townsStatus: () => req('/towns/status'),
   // 市区町村（全国）
   prefectures: () => req('/municipalities/prefectures'),
   municipalities: ({ pref, keyword } = {}) => {
