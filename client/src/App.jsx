@@ -377,7 +377,7 @@ export default function App() {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
       setExportMsg(`✅ ${filename} をダウンロードしました`
-        + (!map ? '\n※ 地図画像を作成できませんでした' : !map.baseMap ? '\n※ ベース地図を取得できなかったため、背景なしの地図を貼り付けました（Google Cloudで「Maps Static API」を有効化してください）' : ''));
+        + (!map ? '\n※ 地図画像を作成できませんでした' : !map.baseMap ? `\n※ 背景の地図を取得できなかったため、背景なしの地図を貼り付けました。\n原因: ${map.baseError || '不明'}` : ''));
     } catch (e) {
       setExportMsg(`出力に失敗しました: ${e.message}`);
     } finally {

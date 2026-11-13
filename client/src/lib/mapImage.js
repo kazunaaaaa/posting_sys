@@ -165,7 +165,7 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
   }
 
   if (!baseMap) {
-    drawLabel(ctx, 'ベース地図なし（Maps Static API 未設定）', canvas.width - 150 * SCALE, canvas.height - 14 * SCALE, { size: 10, bg: '#fff', border: '#999', color: '#555' });
+    drawLabel(ctx, '背景地図なし（Maps Static API を確認）', canvas.width - 150 * SCALE, canvas.height - 14 * SCALE, { size: 10, bg: '#fff', border: '#999', color: '#555' });
   }
 
   return {
