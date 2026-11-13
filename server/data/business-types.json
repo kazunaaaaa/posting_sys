@@ -4,73 +4,205 @@
       "id": "beauty_salon",
       "label": "美容室・ヘアサロン",
       "icon": "💇",
-      "googlePlacesTypes": ["hair_care", "beauty_salon"],
-      "overpass": [{ "key": "shop", "value": "hairdresser" }, { "key": "shop", "value": "beauty" }],
-      "keyword": "美容室"
+      "googlePlacesTypes": [
+        "hair_care",
+        "beauty_salon"
+      ],
+      "overpass": [
+        {
+          "key": "shop",
+          "value": "hairdresser"
+        },
+        {
+          "key": "shop",
+          "value": "beauty"
+        }
+      ],
+      "keyword": "美容室",
+      "target": {
+        "label": "20〜59歳の女性",
+        "ageMin": 20,
+        "ageMax": 59,
+        "sex": "female"
+      }
     },
     {
       "id": "restaurant",
       "label": "飲食店",
       "icon": "🍽️",
-      "googlePlacesTypes": ["restaurant"],
-      "overpass": [{ "key": "amenity", "value": "restaurant" }],
-      "keyword": "レストラン"
+      "googlePlacesTypes": [
+        "restaurant"
+      ],
+      "overpass": [
+        {
+          "key": "amenity",
+          "value": "restaurant"
+        }
+      ],
+      "keyword": "レストラン",
+      "target": {
+        "label": "20〜69歳",
+        "ageMin": 20,
+        "ageMax": 69,
+        "sex": "all"
+      }
     },
     {
       "id": "cafe",
       "label": "カフェ",
       "icon": "☕",
-      "googlePlacesTypes": ["cafe"],
-      "overpass": [{ "key": "amenity", "value": "cafe" }],
-      "keyword": "カフェ"
+      "googlePlacesTypes": [
+        "cafe"
+      ],
+      "overpass": [
+        {
+          "key": "amenity",
+          "value": "cafe"
+        }
+      ],
+      "keyword": "カフェ",
+      "target": {
+        "label": "20〜59歳",
+        "ageMin": 20,
+        "ageMax": 59,
+        "sex": "all"
+      }
     },
     {
       "id": "clinic",
       "label": "クリニック・医院",
       "icon": "🏥",
-      "googlePlacesTypes": ["doctor", "hospital"],
-      "overpass": [{ "key": "amenity", "value": "clinic" }, { "key": "amenity", "value": "doctors" }],
-      "keyword": "クリニック"
+      "googlePlacesTypes": [
+        "doctor",
+        "hospital"
+      ],
+      "overpass": [
+        {
+          "key": "amenity",
+          "value": "clinic"
+        },
+        {
+          "key": "amenity",
+          "value": "doctors"
+        }
+      ],
+      "keyword": "クリニック",
+      "target": {
+        "label": "40歳以上",
+        "ageMin": 40,
+        "ageMax": 120,
+        "sex": "all"
+      }
     },
     {
       "id": "dental",
       "label": "歯科医院",
       "icon": "🦷",
-      "googlePlacesTypes": ["dentist"],
-      "overpass": [{ "key": "amenity", "value": "dentist" }],
-      "keyword": "歯科"
+      "googlePlacesTypes": [
+        "dentist"
+      ],
+      "overpass": [
+        {
+          "key": "amenity",
+          "value": "dentist"
+        }
+      ],
+      "keyword": "歯科",
+      "target": {
+        "label": "全年齢",
+        "ageMin": 0,
+        "ageMax": 120,
+        "sex": "all"
+      }
     },
     {
       "id": "fitness",
       "label": "ジム・フィットネス",
       "icon": "🏋️",
-      "googlePlacesTypes": ["gym"],
-      "overpass": [{ "key": "leisure", "value": "fitness_centre" }],
-      "keyword": "フィットネスジム"
+      "googlePlacesTypes": [
+        "gym"
+      ],
+      "overpass": [
+        {
+          "key": "leisure",
+          "value": "fitness_centre"
+        }
+      ],
+      "keyword": "フィットネスジム",
+      "target": {
+        "label": "20〜59歳",
+        "ageMin": 20,
+        "ageMax": 59,
+        "sex": "all"
+      }
     },
     {
       "id": "cram_school",
       "label": "学習塾・スクール",
       "icon": "📚",
-      "googlePlacesTypes": ["school"],
-      "overpass": [{ "key": "amenity", "value": "school" }],
-      "keyword": "学習塾"
+      "googlePlacesTypes": [
+        "school"
+      ],
+      "overpass": [
+        {
+          "key": "amenity",
+          "value": "school"
+        }
+      ],
+      "keyword": "学習塾",
+      "target": {
+        "label": "6〜15歳（小中学生）",
+        "ageMin": 6,
+        "ageMax": 15,
+        "sex": "all"
+      }
     },
     {
       "id": "convenience",
       "label": "コンビニ・小売",
       "icon": "🏪",
-      "googlePlacesTypes": ["convenience_store", "supermarket"],
-      "overpass": [{ "key": "shop", "value": "convenience" }, { "key": "shop", "value": "supermarket" }],
-      "keyword": "コンビニ"
+      "googlePlacesTypes": [
+        "convenience_store",
+        "supermarket"
+      ],
+      "overpass": [
+        {
+          "key": "shop",
+          "value": "convenience"
+        },
+        {
+          "key": "shop",
+          "value": "supermarket"
+        }
+      ],
+      "keyword": "コンビニ",
+      "target": {
+        "label": "15〜79歳",
+        "ageMin": 15,
+        "ageMax": 79,
+        "sex": "all"
+      }
     },
     {
       "id": "real_estate",
       "label": "不動産",
       "icon": "🏠",
-      "googlePlacesTypes": ["real_estate_agency"],
-      "overpass": [{ "key": "office", "value": "estate_agent" }],
-      "keyword": "不動産"
+      "googlePlacesTypes": [
+        "real_estate_agency"
+      ],
+      "overpass": [
+        {
+          "key": "office",
+          "value": "estate_agent"
+        }
+      ],
+      "keyword": "不動産",
+      "target": {
+        "label": "25〜49歳（住宅購入層）",
+        "ageMin": 25,
+        "ageMax": 49,
+        "sex": "all"
+      }
     }
   ]
 }

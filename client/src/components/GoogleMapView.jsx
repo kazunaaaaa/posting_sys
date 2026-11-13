@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps.js';
-import { COLORS } from '../lib/colors.js';
+import { COLORS, BARRIER_STYLE } from '../lib/colors.js';
 
 function scoreColor(score) {
   if (score == null) return '#e5007e';
@@ -22,7 +22,7 @@ function polygonStyle(p) {
 }
 
 export default function GoogleMapView({
-  apiKey, center, zoom, polygons, points, competitors, circles = [], pin = null, pinLabel = '',
+  apiKey, center, zoom, polygons, points, competitors, circles = [], pin = null, pinLabel = '', barriers = [],
   onToggle, onApi, onCircleChange, onPinChange,
 }) {
   const ref = useRef(null);
@@ -32,6 +32,7 @@ export default function GoogleMapView({
   const markersRef = useRef([]);
   const circlesRef = useRef({}); // id -> google.maps.Circle
   const pinRef = useRef(null);
+  const barrierLinesRef = useRef([]);
   const infoRef = useRef(null);
   const geocoderRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -215,6 +216,25 @@ export default function GoogleMapView({
     }
   }
 
+  // 分断線（川・道路・線路）
+  function syncBarriers() {
+    const maps = window.google?.maps;
+    if (!maps || !mapRef.current) return;
+    barrierLinesRef.current.forEach((l) => l.setMap(null));
+    barrierLinesRef.current = [];
+    for (const b of barriers) {
+      const st = BARRIER_STYLE[b.type] || BARRIER_STYLE.primary;
+      const line = new maps.Polyline({
+        map: mapRef.current,
+        path: b.coords.map(([lng, lat]) => ({ lat, lng })),
+        strokeColor: st.color, strokeOpacity: st.dashed ? 0 : 0.85, strokeWeight: st.weight, zIndex: 4, clickable: false,
+        icons: st.dashed ? [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.9, strokeColor: st.color, scale: 2.5 }, offset: '0', repeat: '10px' }] : undefined,
+      });
+      barrierLinesRef.current.push(line);
+    }
+  }
+
+  useEffect(() => { if (ready) syncBarriers(); /* eslint-disable-next-line */ }, [ready, barriers]);
   useEffect(() => { if (ready) syncPolygons(); /* eslint-disable-next-line */ }, [ready, polygons]);
   useEffect(() => { if (ready) syncPin(); /* eslint-disable-next-line */ }, [ready, pin, pinLabel]);
   useEffect(() => { if (ready) syncMarkers(); /* eslint-disable-next-line */ }, [ready, points, competitors, polygons.length]);

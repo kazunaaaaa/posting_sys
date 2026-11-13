@@ -33,8 +33,10 @@ export const api = {
   // 競合・分析・見積
   businessTypes: () => req('/competitors/business-types'),
   searchCompetitors: (businessTypeId, codes, level) => post('/competitors/search', { businessTypeId, codes, level }),
-  analyze: (codes, level, businessTypeId, competitors, unitCost) =>
-    post('/analyze', { codes, level, businessTypeId, competitors, unitCost }),
+  analyze: (codes, level, businessTypeId, competitors, unitCost, profile) =>
+    post('/analyze', { codes, level, businessTypeId, competitors, unitCost, profile }),
+  // AI最適エリアの作成（ターゲット・川や道路の分断を考慮）
+  optimizeArea: (payload) => post('/optimize/area', payload),
   pricingCompanies: () => req('/pricing/companies'),
   quotes: (codes, level) => post('/pricing/quotes', { codes, level }),
   // 配布部数表（Excel）: { blob, filename }

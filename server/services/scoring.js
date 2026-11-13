@@ -3,6 +3,15 @@
 // 市区町村(重心のみ)・町丁目(ポリゴンあり)いずれにも対応。世帯数nullは対象外。
 import { pointInPolygon, centroid, distanceMeters } from './geo.js';
 
+// ターゲット人数が分かる場合の重み（ターゲットを最重視）
+const WEIGHTS_WITH_TARGET = {
+  reach: 0.20,
+  target: 0.30,
+  opportunity: 0.20,
+  efficiency: 0.15,
+  cost: 0.15,
+};
+
 const WEIGHTS = {
   reach: 0.35,
   opportunity: 0.30,
@@ -72,6 +81,11 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
   const nOpp = normalize(opportunity);
   const nEff = normalize(densities);
   const nCost = normalize(costEff);
+  // ターゲット人数（options.targets = { code: {target, rate, estimated} }）
+  const targets = options.targets || null;
+  const hasTarget = !!targets && areas.some((a) => targets[a.code]?.target > 0);
+  const W = hasTarget ? WEIGHTS_WITH_TARGET : WEIGHTS;
+  const nTarget = hasTarget ? normalize(areas.map((a) => targets[a.code]?.target || 0)) : null;
 
   const scored = areas.map((a, i) => {
     const rate = rateMap[a.code] ?? unitCost;
@@ -80,12 +94,15 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
       opportunity: Math.round(nOpp[i] * 100),
       efficiency: Math.round(nEff[i] * 100),
       cost: Math.round(nCost[i] * 100),
+      ...(hasTarget ? { target: Math.round(nTarget[i] * 100) } : {}),
     };
     const score =
-      nReach[i] * WEIGHTS.reach +
-      nOpp[i] * WEIGHTS.opportunity +
-      nEff[i] * WEIGHTS.efficiency +
-      nCost[i] * WEIGHTS.cost;
+      nReach[i] * W.reach +
+      nOpp[i] * W.opportunity +
+      nEff[i] * W.efficiency +
+      nCost[i] * W.cost +
+      (hasTarget ? nTarget[i] * W.target : 0);
+    const tg = targets?.[a.code];
     return {
       code: a.code,
       name: a.name || a.city,
@@ -99,12 +116,25 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
       competitorPer1000Households: +((compCounts[a.code] / a.households) * 1000).toFixed(2),
       score: Math.round(score * 100),
       breakdown,
+      ...(tg ? {
+        target: tg.target,
+        targetRate: +(tg.rate * 100).toFixed(1), // 人口に占める割合(%)
+        targetPerCopy: a.distribution ? +(tg.target / a.distribution).toFixed(2) : null,
+        targetEstimated: !!tg.estimated,
+      } : {}),
     };
   });
 
   scored.sort((x, y) => y.score - x.score);
+  const targetRanking = hasTarget
+    ? [...scored].sort((x, y) => (y.target || 0) - (x.target || 0)).slice(0, 10)
+        .map((a) => ({ code: a.code, name: a.name, target: a.target, targetRate: a.targetRate, targetPerCopy: a.targetPerCopy }))
+    : [];
   return {
-    weights: WEIGHTS,
+    weights: W,
+    targetProfile: options.targetProfile || null,
+    targetSource: options.targetSource || null,
+    targetRanking,
     unitCost,
     areas: scored,
     best: scored[0] ?? null,
@@ -114,6 +144,7 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
       distribution: areas.reduce((s, a) => s + a.distribution, 0),
       competitors: competitors.length,
       estimatedCost: scored.reduce((s, a) => s + a.estimatedCost, 0),
+      ...(hasTarget ? { target: scored.reduce((s, a) => s + (a.target || 0), 0) } : {}),
     },
   };
 }

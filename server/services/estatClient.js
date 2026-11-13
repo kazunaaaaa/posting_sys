@@ -133,3 +133,117 @@ export async function fetchMunicipalityHouseholds(appId, statsDataId, opts = {})
     },
   };
 }
+
+// ======================================================================
+// 小地域（町丁・字等）の 男女・年齢(5歳階級)別人口
+//   getStatsList の searchKind=2（小地域・地域メッシュ）で統計表を探し、
+//   メタ情報から「男女」「年齢」の分類を自動判定して取得する。
+// ======================================================================
+const textOf = (v) => (v == null ? '' : typeof v === 'object' ? String(v.$ ?? '') : String(v));
+
+// 小地域の統計表を検索
+export async function searchSmallAreaTables(appId, { searchWord = '男女 年齢 5歳階級', surveyYear = '2020' } = {}) {
+  const json = await call('getStatsList', {
+    appId, searchKind: 2, statsCode: '00200521', searchWord, surveyYears: surveyYear, limit: 200,
+  });
+  checkResult(json, 'GET_STATS_LIST');
+  return asArray(json.GET_STATS_LIST?.DATALIST_INF?.TABLE_INF).map((t) => ({
+    id: t['@id'],
+    title: textOf(t.TITLE),
+    statName: textOf(t.STAT_NAME),
+    collectArea: textOf(t.COLLECT_AREA),
+    surveyDate: String(t.SURVEY_DATE ?? ''),
+    text: [textOf(t.TITLE), textOf(t.STATISTICS_NAME), textOf(t.COLLECT_AREA), textOf(t.TITLE_SPEC?.TABLE_NAME)].join(' '),
+  }));
+}
+
+// 都道府県に合う「男女・年齢(5歳階級)別人口（町丁・字等）」の表を選ぶ
+export function pickAgeSexTable(tables, prefName) {
+  const isAgeSex = (t) => /年齢/.test(t.text) && /5歳|５歳/.test(t.text) && /男女/.test(t.text);
+  const cands = tables.filter(isAgeSex);
+  return cands.find((t) => t.text.includes(prefName)) || (cands.length === 1 ? cands[0] : null) || cands[0] || null;
+}
+
+// 「0～4歳」「100歳以上」→ [min, max]。まとめ（再掲・15～64歳など幅広）や不詳は null
+export function parseAgeBand(name) {
+  const s = String(name).replace(/\s/g, '');
+  if (/再掲|不詳|総数|平均|総年齢/.test(s)) return null;
+  let m = s.match(/^(\d+)[～~〜\-－](\d+)歳$/);
+  if (m) { const a = +m[1], b = +m[2]; return b - a === 4 ? [a, b] : null; }
+  m = s.match(/^(\d+)歳以上$/);
+  if (m && +m[1] >= 75) return [+m[1], 120];
+  return null;
+}
+
+export function detectAgeSexClasses(classObjs) {
+  let sex = null, age = null, measure = null;
+  for (const o of classObjs) {
+    const names = o.classes.map((c) => String(c['@name'] || '').trim());
+    if (!sex && names.some((n) => /^男/.test(n)) && names.some((n) => /^女/.test(n))) {
+      sex = {
+        classId: o.id,
+        male: o.classes.find((c) => /^男/.test(c['@name']))['@code'],
+        female: o.classes.find((c) => /^女/.test(c['@name']))['@code'],
+      };
+      continue;
+    }
+    let bands = o.classes.map((c) => ({ code: c['@code'], band: parseAgeBand(c['@name']) })).filter((x) => x.band);
+    if (!age && bands.length >= 10) {
+      // 「○歳以上」は5歳刻みの続き（最上位）の1つだけを使う（85歳以上と85～89歳の二重計上を防ぐ）
+      const closedMax = Math.max(...bands.filter((b) => b.band[1] < 120).map((b) => b.band[1]));
+      bands = bands.filter((b) => b.band[1] < 120 || b.band[0] === closedMax + 1);
+      age = { classId: o.id, bands };
+      continue;
+    }
+    // 表章項目に「人口」と「平均年齢」等が混在する場合は人口だけ
+    const pop = o.classes.find((c) => /人口/.test(c['@name']) && !/平均|総年齢/.test(c['@name']));
+    if (!measure && pop && o.classes.length > 1 && o.id !== 'area' && o.id !== 'time') measure = { classId: o.id, code: pop['@code'] };
+  }
+  return { sex, age, measure };
+}
+
+// 市区町村内の町丁目ごとの男女・年齢別人口 → { areaCode: { bands:[{min,max,m,f}] } }
+export async function fetchTownAgeSex(appId, statsDataId, cityCode) {
+  const classObjs = await getMeta(appId, statsDataId);
+  const { sex, age, measure } = detectAgeSexClasses(classObjs);
+  if (!sex || !age) throw new Error('統計表から「男女」「年齢(5歳階級)」の分類を判定できませんでした');
+  const areaObj = classObjs.find((o) => o.id === 'area');
+  const areaCodes = (areaObj?.classes || []).map((c) => String(c['@code'])).filter((c) => c.startsWith(cityCode)).sort();
+  const timeCode = detectLatestTime(classObjs);
+
+  const base = { appId, statsDataId, metaGetFlg: 'N', cntGetFlg: 'N', limit: 100000 };
+  base[cdParam(sex.classId)] = [sex.male, sex.female].join(',');
+  if (measure) base[cdParam(measure.classId)] = measure.code;
+  if (timeCode) base.cdTime = timeCode;
+  if (areaCodes.length) { base.cdAreaFrom = areaCodes[0]; base.cdAreaTo = areaCodes[areaCodes.length - 1]; }
+
+  const bandByCode = new Map(age.bands.map((b) => [b.code, b.band]));
+  const sexAttr = '@' + sex.classId, ageAttr = '@' + age.classId;
+  const out = {};
+  let start = null;
+  for (let page = 0; page < 30; page++) {
+    const json = await call('getStatsData', start ? { ...base, startPosition: start } : base);
+    checkResult(json, 'GET_STATS_DATA');
+    const sd = json.GET_STATS_DATA?.STATISTICAL_DATA;
+    for (const v of asArray(sd?.DATA_INF?.VALUE)) {
+      const area = String(v['@area'] ?? '');
+      if (!area.startsWith(cityCode)) continue;
+      const band = bandByCode.get(v[ageAttr]);
+      if (!band) continue;
+      const n = Number(String(v.$).replace(/,/g, ''));
+      const val = Number.isFinite(n) ? n : 0; // 秘匿（-・X）は0
+      const rec = (out[area] ??= { bands: new Map() });
+      const key = band.join('-');
+      const b = rec.bands.get(key) || { min: band[0], max: band[1], m: 0, f: 0 };
+      if (v[sexAttr] === sex.male) b.m += val; else if (v[sexAttr] === sex.female) b.f += val;
+      rec.bands.set(key, b);
+    }
+    start = sd?.RESULT_INF?.NEXT_KEY;
+    if (!start) break;
+  }
+  const result = {};
+  for (const [area, rec] of Object.entries(out)) {
+    result[area] = { bands: [...rec.bands.values()].sort((a, b) => a.min - b.min) };
+  }
+  return { towns: result, meta: { statsDataId, sexClass: sex.classId, ageClass: age.classId, bands: age.bands.length, timeCode, areaCount: Object.keys(result).length } };
+}

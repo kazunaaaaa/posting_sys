@@ -21,6 +21,15 @@ function ruleBasedExplanation(scoring, businessTypeLabel) {
     `到達${best.breakdown.reach}・競合機会${best.breakdown.opportunity}・効率${best.breakdown.efficiency}・コスト${best.breakdown.cost}の内訳で、` +
       `世帯規模と競合の少なさのバランスが最も優れています。`
   );
+  if (scoring.targetRanking?.length) {
+    const tp = scoring.targetProfile?.label || 'ターゲット';
+    const est = scoring.targetSource === 'estimate' ? '（全国の年齢構成による推計）' : scoring.targetSource === 'mixed' ? '（一部推計）' : '（国勢調査）';
+    lines.push(
+      `【ターゲット】${tp}が多いエリア${est}: ` +
+        scoring.targetRanking.slice(0, 3).map((a) => `${a.name} ${a.target.toLocaleString()}人（人口の${a.targetRate}%・1部あたり${a.targetPerCopy}人）`).join(' / ') +
+        `。選択エリア全体で約${(totals.target || 0).toLocaleString()}人に届く見込みです。`
+    );
+  }
   lines.push(
     `上位候補: ${top3.map((a) => `${a.name}(${a.score})`).join(' / ')}。` +
       `選択中エリア合計は世帯 ${totals.households.toLocaleString()}・配布 ${totals.distribution.toLocaleString()}部・想定コスト 約${totals.estimatedCost.toLocaleString()}円です。`
@@ -42,7 +51,8 @@ export async function explainBestArea(scoring, businessTypeLabel) {
 ${JSON.stringify(scoring, null, 2)}
 
 このデータを踏まえ、日本語で次を簡潔に述べてください:
-1. 最も配布に適したエリアはどこか、その理由（世帯規模・競合密度・配布効率の観点）
+1. 最も配布に適したエリアはどこか、その理由（世帯規模・ターゲット人数・競合密度・配布効率の観点）
+   ターゲット人数（target / targetRate / targetPerCopy・targetRanking）がある場合は、ターゲットが多いエリアを必ず挙げること
 2. 逆に優先度を下げるべきエリアと理由
 3. 予算配分の提案（上位エリアへの傾斜配分の考え方）
 箇条書き中心で、合計300〜400字程度。数値は与えられたデータのみ使用すること。`;

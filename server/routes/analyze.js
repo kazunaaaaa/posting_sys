@@ -4,13 +4,14 @@ import { searchCompetitors, getBusinessType } from '../services/places.js';
 import { scoreAreas } from '../services/scoring.js';
 import { explainBestArea } from '../services/claude.js';
 import { cheapestRateMap, getQuotes } from '../services/pricing.js';
+import { computeTargets } from '../services/demographics.js';
 
 const router = Router();
 
-// 最適エリア分析: { codes, level, businessTypeId, unitCost?, competitors? }
+// 最適エリア分析: { codes, level, businessTypeId, unitCost?, competitors?, profile?:{ageMin,ageMax,sex,label} }
 router.post('/', async (req, res) => {
   try {
-    const { codes = [], level = 'municipality', businessTypeId, unitCost, competitors: passed } = req.body ?? {};
+    const { codes = [], level = 'municipality', businessTypeId, unitCost, competitors: passed, profile } = req.body ?? {};
     if (!codes.length) return res.status(400).json({ error: 'codes is required' });
 
     const areas = await resolveAreas(codes, level);
@@ -26,7 +27,16 @@ router.post('/', async (req, res) => {
 
     // 配布会社の最安見積単価をコスト軸に反映
     const rateMap = cheapestRateMap(codes);
-    const scoring = scoreAreas(areas, competitors, { unitCost, rateMap });
+
+    // ターゲット人数（町丁目単位のみ）: 入力された属性 → 無ければ業態の標準ターゲット
+    let tg = null;
+    const prof = profile || bt?.target;
+    if (level === 'town' && prof) tg = await computeTargets(areas, prof);
+
+    const scoring = scoreAreas(areas, competitors, {
+      unitCost, rateMap,
+      targets: tg?.byCode, targetProfile: tg?.profile, targetSource: tg?.source,
+    });
     const quotes = getQuotes(areas);
     const explanation = await explainBestArea(scoring, bt?.label ?? '指定業態');
 

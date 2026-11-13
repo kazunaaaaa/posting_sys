@@ -10,6 +10,7 @@ import analyzeRouter from './routes/analyze.js';
 import pricingRouter from './routes/pricing.js';
 import staticmapRouter from './routes/staticmap.js';
 import exportRouter from './routes/export.js';
+import optimizeRouter from './routes/optimize.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/analyze', analyzeRouter);
 app.use('/api/pricing', pricingRouter);
 app.use('/api/staticmap', staticmapRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/optimize', optimizeRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

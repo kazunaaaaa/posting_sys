@@ -56,6 +56,12 @@ export default function App() {
   const [countTarget, setCountTarget] = useState(10000);
   const [countMsg, setCountMsg] = useState('');
 
+  // ターゲット属性（業態を選ぶと標準値が入る。自由に変更可）
+  const [profile, setProfile] = useState({ ageMin: '', ageMax: '', sex: 'all' });
+  // AI最適エリアの結果と、地図に描く分断線（川・道路・線路）
+  const [optResult, setOptResult] = useState(null);
+  const [barriers, setBarriers] = useState([]);
+
   // 配布部数表（Excel）
   const [storeName, setStoreName] = useState('');
   const [projectName, setProjectName] = useState('');
@@ -188,6 +194,7 @@ export default function App() {
 
   function clearAll() {
     setSelected([]); setCircles([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null);
+    setBarriers([]); setOptResult(null);
     setCountMsg(''); setExportMsg('');
   }
 
@@ -298,21 +305,70 @@ export default function App() {
 
   // ---- 「📍から約 N 部を追加」----
   // ピン周辺の市区町村（県境をまたぐ）の町丁目を自動で読み込み、近い順に目標部数まで選ぶ
+  // ピン周辺の市区町村（県境をまたぐ）の町丁目を読み込む。失敗した市区町村名を failed に入れる
+  async function loadNearbyTowns(p, km, limit, failed) {
+    const { municipalities } = await api.nearby(p.lat, p.lng, km, limit);
+    const toLoad = municipalities.filter((m) => !townCitiesRef.current.some((c) => c.code === m.code) && !failed.has(m.city.replace(' ', '')));
+    if (!toLoad.length) return;
+    setCountMsg(`周辺の町丁目を読み込み中…（${toLoad.map((m) => m.city.replace(' ', '')).join('・')}）`);
+    const results = await Promise.allSettled(toLoad.map((m) => loadTownCity(m.code, m.city.replace(' ', ''), { quiet: true })));
+    results.forEach((r, i) => { if (r.status === 'rejected') failed.add(toLoad[i].city.replace(' ', '')); });
+  }
+
+  // ターゲット属性（空欄は 0歳〜上限なし）
+  function profilePayload() {
+    return {
+      ageMin: profile.ageMin === '' ? 0 : Number(profile.ageMin),
+      ageMax: profile.ageMax === '' ? 120 : Number(profile.ageMax),
+      sex: profile.sex,
+    };
+  }
+
+  function changeBusinessType(id) {
+    setBusinessTypeId(id); setCompetitors([]); setAnalysis(null);
+    const t = businessTypes.find((b) => b.id === id)?.target;
+    if (t) setProfile({ ageMin: t.ageMin ? String(t.ageMin) : '', ageMax: t.ageMax >= 120 ? '' : String(t.ageMax), sex: t.sex });
+  }
+
+  // ---- 🤖 AIで最適エリアを作成（選択中に限らず、ピン周辺から作る）----
+  async function createOptimalArea() {
+    if (mode !== 'town') return;
+    const p = ensurePin();
+    if (!p) return;
+    const target = Number(countTarget);
+    const failed = new Set();
+    setLoading((l) => ({ ...l, optimize: true }));
+    try {
+      setCountMsg('🤖 周辺の市区町村を確認中…');
+      await loadNearbyTowns(p, 5, 6, failed);
+      const loadedCopies = townAreasRef.current.reduce((s, t) => s + (t.distribution || 0), 0);
+      if (loadedCopies < target * 3) await loadNearbyTowns(p, 12, 15, failed);
+      setCountMsg('🤖 ターゲットの多さ・川や道路の分断を考慮して、最適エリアを作成中…（初回は道路・人口データの取得に少しかかります）');
+      const r = await api.optimizeArea({
+        pin: p, targetCopies: target, cityCodes: townCitiesRef.current.map((c) => c.code),
+        businessTypeId: businessTypeId || null, profile: profilePayload(),
+      });
+      if (!r.codes?.length) { setCountMsg('最適エリアを作成できませんでした（候補の町丁目がありません）'); return; }
+      setSelected(r.codes);
+      setCircles([]);
+      setBarriers(r.barriers || []);
+      setOptResult({ ...r, failed: [...failed] });
+      setCountMsg(`🤖 最適エリアを作成しました: 約${target.toLocaleString()}部 → ${r.sum.toLocaleString()}部（${r.codes.length}エリア・半径約${r.maxDistanceKm}km）`);
+      await runAnalysis(r.codes);
+    } catch (e) {
+      setCountMsg(`最適エリアの作成に失敗しました: ${e.message}`);
+    } finally {
+      setLoading((l) => ({ ...l, optimize: false }));
+    }
+  }
+
   async function addByCount() {
     if (mode !== 'town') return;
     const p = ensurePin();
     if (!p) return;
     const target = Number(countTarget);
     const failed = new Set();
-
-    const loadNearby = async (km, limit) => {
-      const { municipalities } = await api.nearby(p.lat, p.lng, km, limit);
-      const toLoad = municipalities.filter((m) => !townCitiesRef.current.some((c) => c.code === m.code) && !failed.has(m.city));
-      if (!toLoad.length) return;
-      setCountMsg(`周辺の町丁目を読み込み中…（${toLoad.map((m) => m.city.replace(' ', '')).join('・')}）`);
-      const results = await Promise.allSettled(toLoad.map((m) => loadTownCity(m.code, m.city.replace(' ', ''), { quiet: true })));
-      results.forEach((r, i) => { if (r.status === 'rejected') failed.add(toLoad[i].city.replace(' ', '')); });
-    };
+    const loadNearby = (km, limit) => loadNearbyTowns(p, km, limit, failed);
     const compute = () => {
       const sel = new Set(selected);
       const candidates = townAreasRef.current.filter((t) => !sel.has(t.code));
@@ -394,16 +450,17 @@ export default function App() {
     } finally { setLoading((l) => ({ ...l, comp: false })); }
   }
 
-  async function runAnalysis() {
-    if (!selected.length) return;
+  async function runAnalysis(codesArg) {
+    const codes = Array.isArray(codesArg) ? codesArg : selected;
+    if (!codes.length) return;
     setLoading((l) => ({ ...l, analyze: true }));
     try {
       let comps = competitors;
-      if (businessTypeId && !comps.length) {
-        const r = await api.searchCompetitors(businessTypeId, selected, mode);
+      if (businessTypeId && (!comps.length || Array.isArray(codesArg))) {
+        const r = await api.searchCompetitors(businessTypeId, codes, mode);
         comps = r.competitors; setCompetitors(comps); setCompetitorSource(r.source);
       }
-      const res = await api.analyze(selected, mode, businessTypeId || null, comps, unitCost);
+      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload());
       setAnalysis(res);
     } finally { setLoading((l) => ({ ...l, analyze: false })); }
   }
@@ -532,13 +589,34 @@ export default function App() {
             </Section>
           )}
 
-          <Section title="競合分析">
+          <Section title="業態・ターゲット・競合">
             <Field label="業態を選択">
-              <select value={businessTypeId} onChange={(e) => { setBusinessTypeId(e.target.value); setCompetitors([]); setAnalysis(null); }}>
+              <select value={businessTypeId} onChange={(e) => changeBusinessType(e.target.value)}>
                 <option value="">-- 業態を選択 --</option>
                 {businessTypes.map((b) => <option key={b.id} value={b.id}>{b.icon} {b.label}</option>)}
               </select>
             </Field>
+            <div className="targetbox">
+              <div className="targetbox-title">🎯 ターゲット属性 <span>{profileLabel(profile)}</span></div>
+              <div className="targetrow">
+                年齢
+                <input type="number" min="0" max="120" placeholder="0" value={profile.ageMin}
+                  onChange={(e) => setProfile((p) => ({ ...p, ageMin: e.target.value }))} />
+                〜
+                <input type="number" min="0" max="120" placeholder="上限なし" value={profile.ageMax}
+                  onChange={(e) => setProfile((p) => ({ ...p, ageMax: e.target.value }))} />
+                歳
+              </div>
+              <div className="targetrow">
+                性別
+                <select value={profile.sex} onChange={(e) => setProfile((p) => ({ ...p, sex: e.target.value }))}>
+                  <option value="all">男女とも</option>
+                  <option value="female">女性</option>
+                  <option value="male">男性</option>
+                </select>
+              </div>
+              <div className="hint">業態を選ぶと標準のターゲットが入ります（自由に変更可）。町丁目ごとのターゲット人数は国勢調査の年齢・男女別人口から計算します。</div>
+            </div>
             <button className="btn ghost" disabled={!businessTypeId || !selected.length || loading.comp} onClick={loadCompetitors}>
               {loading.comp ? '検索中…' : '競合をプロット'}
             </button>
@@ -575,6 +653,7 @@ export default function App() {
             <LegendDot color={COLORS.selFill} label="選択エリア" />
             <LegendDot color={COLORS.circle} label="円" />
             <LegendDot color="#7c3aed" label="競合" />
+            {barriers.length > 0 && <><LegendLine color="#2563eb" label="川" /><LegendLine color="#475569" label="道路" /><LegendLine color="#111827" label="線路" dashed /></>}
             {analysis && <LegendGradient />}
           </div>
           <div className="maptoolbar sub">
@@ -591,7 +670,11 @@ export default function App() {
                   {COUNT_OPTIONS.map((n) => <option key={n} value={n}>{n.toLocaleString()}部</option>)}
                 </select>
                 を
-                <button className="chip solid" onClick={addByCount} disabled={!!loading.town}>追加</button>
+                <button className="chip solid" onClick={addByCount} disabled={!!loading.town || !!loading.optimize}>追加</button>
+                <button className="chip ai" onClick={createOptimalArea} disabled={!!loading.town || !!loading.optimize}
+                  title="選択中に限らず、ターゲットの多さと川・道路・線路の分断を考慮して、目標部数のエリアを新しく作ります">
+                  {loading.optimize ? '🤖 作成中…' : '🤖 AIで最適エリアを作成'}
+                </button>
               </span>
             )}
           </div>
@@ -623,6 +706,7 @@ export default function App() {
               onApi={handleApi}
               onCircleChange={onCircleChange}
               onPinChange={setPin}
+              barriers={barriers}
               emptyHint={mode === 'municipality' ? '都道府県を選び、自治体を選択してください' : 'エリアを選択してください'}
             />
           </div>
@@ -630,6 +714,29 @@ export default function App() {
 
         {/* 右パネル */}
         <aside className="panel right">
+          {optResult && (
+            <Section title="🤖 AIが作成した最適エリア">
+              <div className="optsum">
+                <div><b>{optResult.sum.toLocaleString()}</b>部<span>（目標 約{optResult.targetCopies.toLocaleString()}部）</span></div>
+                <div><b>{optResult.codes.length}</b>エリア・ピンから半径約<b>{optResult.maxDistanceKm}</b>km</div>
+                {optResult.targetTotal > 0 && (
+                  <div>🎯 {optResult.profile?.label}: 約<b>{optResult.targetTotal.toLocaleString()}</b>人
+                    <span>{optResult.targetSource === 'census' ? '（国勢調査）' : optResult.targetSource === 'mixed' ? '（一部推計）' : '（全国の年齢構成による推計）'}</span></div>
+                )}
+              </div>
+              <ul className="optnotes">
+                <li>ピンのある町丁目から、隣り合う町丁目へ順に広げました（飛び地なし{optResult.islands ? `／やむを得ず${optResult.islands}か所` : ''}）</li>
+                <li>ターゲットの多い町丁目を優先し、川・高速道路・国道・線路をまたぐ町丁目は後回しにしました</li>
+                {optResult.skippedByBarrier?.length > 0 && (
+                  <li>分断のため除外した近くの町丁目: {optResult.skippedByBarrier.slice(0, 6).map((x) => `${townLabel(x.name)}（${x.barriers.slice(0, 2).join('・')}の向こう側）`).join('、')}</li>
+                )}
+                {optResult.crossedBarriers?.length > 0 && <li>部数を満たすためにまたいだもの: {optResult.crossedBarriers.slice(0, 5).join('、')}</li>}
+                {optResult.barrierError && <li className="warn">{optResult.barrierError}（川は町丁目の水面区画で考慮しています）</li>}
+                {optResult.targetSource !== 'census' && <li className="warn">年齢・男女別人口を取得できなかった町丁目は、全国の年齢構成で推計しています</li>}
+                {optResult.failed?.length > 0 && <li className="warn">読み込めなかった市区町村: {optResult.failed.join('、')}</li>}
+              </ul>
+            </Section>
+          )}
           <Section title="選択中エリア">
             <div className="selhead">
               <span>{totalDistribution ? `${totalDistribution.toLocaleString()}部` : '—'}</span>
@@ -685,12 +792,29 @@ export default function App() {
                   </div>
                   <div className="explain">{analysis.explanation.text}</div>
                   <div className="hint">解説: {analysis.explanation.source === 'claude' ? `Claude (${analysis.explanation.model})` : 'ルールベース（Claude APIキー未設定）'}</div>
+                  {analysis.scoring.targetRanking?.length > 0 && (
+                    <>
+                      <h4 className="subhead">🎯 ターゲット（{analysis.scoring.targetProfile?.label}）が多いエリア
+                        <span>{analysis.scoring.targetSource === 'census' ? '国勢調査' : analysis.scoring.targetSource === 'mixed' ? '一部推計' : '推計'}</span></h4>
+                      <table className="ranktable">
+                        <thead><tr><th>順</th><th>エリア</th><th>人数</th><th>割合</th><th>1部あたり</th></tr></thead>
+                        <tbody>
+                          {analysis.scoring.targetRanking.map((a, i) => (
+                            <tr key={a.code} className={i === 0 ? 'top' : ''}>
+                              <td>{i + 1}</td><td>{townLabel(a.name)}</td><td>{a.target.toLocaleString()}</td><td>{a.targetRate}%</td><td>{a.targetPerCopy}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+                  <h4 className="subhead">総合スコア</h4>
                   <table className="ranktable">
-                    <thead><tr><th>順位</th><th>エリア</th><th>点</th><th>競合</th></tr></thead>
+                    <thead><tr><th>順位</th><th>エリア</th><th>点</th><th>ターゲット</th><th>競合</th></tr></thead>
                     <tbody>
                       {analysis.scoring.areas.map((a, i) => (
                         <tr key={a.code} className={a.code === bestCode ? 'top' : ''}>
-                          <td>{i + 1}</td><td>{a.name}</td><td>{a.score}</td><td>{a.competitorCount}</td>
+                          <td>{i + 1}</td><td>{townLabel(a.name)}</td><td>{a.score}</td><td>{a.target != null ? a.target.toLocaleString() : '—'}</td><td>{a.competitorCount}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -731,6 +855,16 @@ export default function App() {
 function Section({ title, children }) { return <section className="section"><h3>{title}</h3>{children}</section>; }
 function Field({ label, children }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function Row({ k, v, strong }) { return <div className={`kv ${strong ? 'strong' : ''}`}><span>{k}</span><span>{v}</span></div>; }
+function LegendLine({ color, label, dashed }) {
+  return <span className="legend"><i style={{ background: dashed ? `repeating-linear-gradient(90deg,${color} 0 4px,transparent 4px 7px)` : color, height: 3, width: 16, borderRadius: 2 }} />{label}</span>;
+}
+function profileLabel(p) {
+  const min = p.ageMin === '' ? 0 : Number(p.ageMin);
+  const max = p.ageMax === '' ? 120 : Number(p.ageMax);
+  const age = min === 0 && max >= 120 ? '全年齢' : max >= 120 ? `${min}歳以上` : `${min}〜${max}歳`;
+  const sex = { all: '', female: 'の女性', male: 'の男性' }[p.sex] || '';
+  return age + sex;
+}
 function LegendDot({ color, label }) { return <span className="legend"><i style={{ background: color }} />{label}</span>; }
 function LegendGradient() { return <span className="legend"><i style={{ background: 'linear-gradient(90deg,hsl(0,80%,45%),hsl(60,80%,45%),hsl(120,80%,45%))', width: 40 }} />スコア低→高</span>; }
 function sourceLabel(s) { return { google: 'Google Places', osm: 'OpenStreetMap', sample: 'サンプル', none: '-' }[s] || s; }

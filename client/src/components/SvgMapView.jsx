@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { COLORS } from '../lib/colors.js';
+import { COLORS, BARRIER_STYLE } from '../lib/colors.js';
 
 // Google Maps キー未設定時のフォールバック簡易地図（SVG）。
 // polygons(複数リング) + points(候補重心) + competitors + circles(範囲円) を等距離近似で投影。
@@ -10,7 +10,7 @@ function scoreColor(score) {
 }
 
 export default function SvgMapView({
-  polygons, points, competitors, circles = [], pin = null, pinLabel = '', businessIcon, onToggle, onApi, emptyHint,
+  polygons, points, competitors, circles = [], pin = null, pinLabel = '', barriers = [], businessIcon, onToggle, onApi, emptyHint,
 }) {
   const [hover, setHover] = useState(null);
   const W = 900, H = 640, pad = 44;
@@ -90,6 +90,15 @@ export default function SvgMapView({
                 </>
               )}
             </g>
+          );
+        })}
+        {/* 分断線（川・道路・線路） */}
+        {barriers.map((b, i) => {
+          const st = BARRIER_STYLE[b.type] || BARRIER_STYLE.primary;
+          return (
+            <polyline key={'bar-' + i} pointerEvents="none" fill="none"
+              points={b.coords.map(([lng, lat]) => { const q = project(lng, lat); return `${q.x},${q.y}`; }).join(' ')}
+              stroke={st.color} strokeWidth={st.weight * 0.8} strokeOpacity="0.85" strokeDasharray={st.dashed ? '5 4' : undefined} />
           );
         })}
         {/* 範囲円 */}
