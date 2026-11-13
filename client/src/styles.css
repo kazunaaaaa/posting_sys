@@ -190,3 +190,6 @@ body {
 .subhead span { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 11px; }
 .kv small { font-size: 10px; color: var(--muted); margin-left: 2px; }
 .hint.warn { color: #b45309; }
+.ratebox { display: flex; align-items: center; gap: 8px; }
+.ratebox input { width: 90px !important; }
+.ratebox .link { background: none; border: 0; padding: 0; color: #0e7fb5; font-size: 12px; cursor: pointer; white-space: nowrap; }

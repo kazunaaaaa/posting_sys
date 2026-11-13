@@ -33,8 +33,8 @@ export const api = {
   // 競合・分析・見積
   businessTypes: () => req('/competitors/business-types'),
   searchCompetitors: (businessTypeId, codes, level) => post('/competitors/search', { businessTypeId, codes, level }),
-  analyze: (codes, level, businessTypeId, competitors, unitCost, profile, incomePref) =>
-    post('/analyze', { codes, level, businessTypeId, competitors, unitCost, profile, incomePref: incomePref || null }),
+  analyze: (codes, level, businessTypeId, competitors, unitCost, profile, incomePref, coverRate) =>
+    post('/analyze', { codes, level, businessTypeId, competitors, unitCost, profile, incomePref: incomePref || null, coverRate }),
   // AI最適エリアの作成（ターゲット・川や道路の分断を考慮）
   optimizeArea: (payload) => post('/optimize/area', payload),
   pricingCompanies: () => req('/pricing/companies'),

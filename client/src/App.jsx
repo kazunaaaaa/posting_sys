@@ -5,6 +5,7 @@ import { pickByCount } from './lib/selectByCount.js';
 import { buildMapImage } from './lib/mapImage.js';
 import { townLabel } from './lib/labels.js';
 import { COLORS } from './lib/colors.js';
+import { DEFAULT_RATE, withRate, rateFromPercent } from './lib/distribution.js';
 
 // 「📍から約 N 部を追加」の選択肢
 const COUNT_OPTIONS = [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000, 50000, 100000];
@@ -13,7 +14,11 @@ import SvgMapView from './components/SvgMapView.jsx';
 
 export default function App() {
   const [config, setConfig] = useState(null);
-  const [rate, setRate] = useState(0.7);
+  // 世帯カバー率（％入力。既定70%）: 配布部数 = 世帯数 × カバー率（10部未満切り捨て）
+  const [ratePct, setRatePct] = useState(String(DEFAULT_RATE * 100));
+  const rate = rateFromPercent(ratePct) ?? DEFAULT_RATE;
+  const rateRef = useRef(rate);
+  rateRef.current = rate;
   const [mode, setMode] = useState('town'); // 'town' | 'municipality'
 
   // 町丁目モード（e-Stat 小地域の実境界。市区町村単位で読み込む）
@@ -88,8 +93,7 @@ export default function App() {
     setTownPref(p); setTownKeyword('');
     if (!p) { setTownPrefMunis([]); return; }
     const d = await api.municipalities({ pref: p });
-    setTownPrefMunis(d.municipalities);
-    setRate(d.distributionRate ?? 0.7);
+    setTownPrefMunis(d.municipalities.map((m) => withRate(m, rateRef.current)));
   }
 
   // 市区町村の町丁目を読み込む。quiet=true のときは失敗してもエラー枠を出さず例外を投げる。
@@ -100,7 +104,7 @@ export default function App() {
     try {
       const d = await api.towns(code);
       const have = new Set(townAreasRef.current.map((t) => t.code));
-      const added = d.towns.filter((t) => !have.has(t.code));
+      const added = d.towns.filter((t) => !have.has(t.code)).map((t) => withRate(t, rateRef.current));
       townAreasRef.current = [...townAreasRef.current, ...added];
       townCitiesRef.current = [...townCitiesRef.current, { code, name, count: d.towns.length }];
       setTownAreas(townAreasRef.current);
@@ -136,10 +140,23 @@ export default function App() {
     setLoading((l) => ({ ...l, muni: true }));
     try {
       const d = await api.municipalities({ pref: p });
-      setPrefMunis(d.municipalities);
+      setPrefMunis(d.municipalities.map((m) => withRate(m, rateRef.current)));
       setMuniSource(d.source);
     } finally { setLoading((l) => ({ ...l, muni: false })); }
   }
+
+  // カバー率を変えたら、読み込み済みの全エリアの配布部数を計算し直す
+  const rateAppliedRef = useRef(rate);
+  useEffect(() => {
+    if (rateAppliedRef.current === rate) return;
+    rateAppliedRef.current = rate;
+    townAreasRef.current = townAreasRef.current.map((t) => withRate(t, rate));
+    setTownAreas(townAreasRef.current);
+    setPrefMunis((l) => l.map((m) => withRate(m, rate)));
+    setTownPrefMunis((l) => l.map((m) => withRate(m, rate)));
+    setAnalysis(null);
+    setOptResult(null); // 作成時の部数と合わなくなるため
+  }, [rate]);
 
   // 現在モードの全エリア
   const currentAreas = mode === 'town' ? townAreas : prefMunis;
@@ -348,7 +365,7 @@ export default function App() {
       setCountMsg('🤖 ターゲットの多さ・川や道路の分断を考慮して、最適エリアを作成中…（初回は道路・人口データの取得に少しかかります）');
       const r = await api.optimizeArea({
         pin: p, targetCopies: target, cityCodes: townCitiesRef.current.map((c) => c.code),
-        businessTypeId: businessTypeId || null, profile: profilePayload(), incomePref: incomePref || null,
+        businessTypeId: businessTypeId || null, profile: profilePayload(), incomePref: incomePref || null, coverRate: rate,
       });
       if (!r.codes?.length) { setCountMsg('最適エリアを作成できませんでした（候補の町丁目がありません）'); return; }
       setSelected(r.codes);
@@ -494,7 +511,7 @@ export default function App() {
         const r = await api.searchCompetitors(businessTypeId, codes, mode);
         comps = r.competitors; setCompetitors(comps); setCompetitorSource(r.source);
       }
-      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload(), incomePref);
+      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload(), incomePref, rate);
       const withCodes = { ...res, codes: [...codes], incomePref };
       setAnalysis(withCodes);
       return withCodes;
@@ -535,7 +552,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="logo">📮 ポスティング配布エリア選択</div>
-        <div className="tagline">世帯数×{Math.round(rate * 100)}%の配布部数 ／ 競合分析 ／ AI最適エリア ／ 配布会社見積</div>
+        <div className="tagline">世帯数×{Math.round(rate * 1000) / 10}%の配布部数 ／ 競合分析 ／ AI最適エリア ／ 配布会社見積</div>
       </header>
 
       <div className="layout">
@@ -668,13 +685,21 @@ export default function App() {
           </Section>
 
           <Section title="配布サマリ">
+            <Field label="世帯カバー率(%)">
+              <div className="ratebox">
+                <input type="number" min="1" max="100" step="1" value={ratePct}
+                  onChange={(e) => setRatePct(e.target.value)}
+                  onBlur={() => setRatePct(String(Math.round(rate * 1000) / 10))} />
+                {rate !== DEFAULT_RATE && <button type="button" className="link" onClick={() => setRatePct(String(DEFAULT_RATE * 100))}>70%に戻す</button>}
+              </div>
+            </Field>
             <Field label="配布単価(円/部)">
               <input type="number" step="0.5" value={unitCost} onChange={(e) => setUnitCost(+e.target.value)} />
             </Field>
             <div className="summary">
               <Row k="選択エリア" v={`${selectedAreas.length} エリア`} />
               <Row k="合計世帯数" v={hasNullHh && totalHouseholds === 0 ? '—' : totalHouseholds.toLocaleString()} />
-              <Row k={`配布部数 (×${Math.round(rate * 100)}%)`} v={totalDistribution ? `${totalDistribution.toLocaleString()} 部` : '—'} strong />
+              <Row k={`配布部数 (×${Math.round(rate * 1000) / 10}%)`} v={totalDistribution ? `${totalDistribution.toLocaleString()} 部` : '—'} strong />
               <Row k="想定コスト" v={estCost ? `約 ${estCost.toLocaleString()} 円` : '—'} />
             </div>
             {hasNullHh && <div className="hint">一部エリアの世帯数が未取得です（e-Stat接続で解決）。</div>}

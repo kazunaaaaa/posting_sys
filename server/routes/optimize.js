@@ -5,6 +5,7 @@ import { computeTargets, normalizeProfile } from '../services/demographics.js';
 import { fetchBarriers, BARRIER_TYPES } from '../services/barriers.js';
 import { buildOptimalArea } from '../services/optimizeArea.js';
 import { computeIncome } from '../services/income.js';
+import { applyRate, normalizeRate } from '../services/distribution.js';
 
 const router = Router();
 
@@ -17,17 +18,18 @@ function distKm(a, b) {
 // POST /api/optimize/area { pin:{lat,lng}, targetCopies, cityCodes:[...], businessTypeId?, profile?, excludeCodes? }
 router.post('/area', async (req, res) => {
   try {
-    const { pin, targetCopies, cityCodes = [], businessTypeId, profile, excludeCodes = [], incomePref = null } = req.body ?? {};
+    const { pin, targetCopies, cityCodes = [], businessTypeId, profile, excludeCodes = [], incomePref = null, coverRate } = req.body ?? {};
     if (!pin || !Number.isFinite(+pin.lat) || !Number.isFinite(+pin.lng)) return res.status(400).json({ error: 'pin が必要です' });
     if (!(+targetCopies > 0)) return res.status(400).json({ error: 'targetCopies が必要です' });
     if (!cityCodes.length) return res.status(400).json({ error: '町丁目を読み込んだ市区町村がありません' });
     const p = { lat: +pin.lat, lng: +pin.lng };
 
     // 町丁目
+    const rate = normalizeRate(coverRate);
     const towns = [];
     const loadErrors = [];
     for (const code of cityCodes) {
-      try { towns.push(...(await getTowns(code)).towns); } catch (e) { loadErrors.push(`${code}: ${e.message}`); }
+      try { towns.push(...applyRate((await getTowns(code)).towns, rate)); } catch (e) { loadErrors.push(`${code}: ${e.message}`); }
     }
     if (!towns.length) return res.status(502).json({ error: '町丁目データを読み込めませんでした', details: loadErrors });
 
@@ -76,6 +78,7 @@ router.post('/area', async (req, res) => {
 
     res.json({
       ...result,
+      coverRate: rate,
       profile: tg.profile,
       targetSource: tg.source,
       targetErrors: tg.errors.slice(0, 3),

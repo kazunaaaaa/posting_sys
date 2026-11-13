@@ -54,7 +54,7 @@ export async function explainBestArea(scoring, businessTypeLabel) {
 
   const prompt = `あなたはポスティング（チラシ配布）の販促プランナーです。
 以下は候補エリアの分析データ（JSON）です。業態は「${businessTypeLabel}」。
-配布部数は各エリアの世帯数×70%で算出しています。
+配布部数は各エリアの世帯数×${Math.round((scoring.coverRate ?? 0.7) * 1000) / 10}%（世帯カバー率）で算出しています。
 
 ${JSON.stringify(scoring, null, 2)}
 

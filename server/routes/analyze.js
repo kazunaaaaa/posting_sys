@@ -6,16 +6,19 @@ import { explainBestArea } from '../services/claude.js';
 import { cheapestRateMap, getQuotes } from '../services/pricing.js';
 import { computeTargets } from '../services/demographics.js';
 import { computeIncome, computeMunicipalIncome } from '../services/income.js';
+import { applyRate, normalizeRate } from '../services/distribution.js';
 
 const router = Router();
 
 // 最適エリア分析: { codes, level, businessTypeId, unitCost?, competitors?, profile?:{ageMin,ageMax,sex,label}, incomePref?:'high'|'low' }
 router.post('/', async (req, res) => {
   try {
-    const { codes = [], level = 'municipality', businessTypeId, unitCost, competitors: passed, profile, incomePref } = req.body ?? {};
+    const { codes = [], level = 'municipality', businessTypeId, unitCost, competitors: passed, profile, incomePref, coverRate } = req.body ?? {};
+    const rate = normalizeRate(coverRate);
     if (!codes.length) return res.status(400).json({ error: 'codes is required' });
 
-    const areas = await resolveAreas(codes, level);
+    // 配布部数は画面のカバー率で計算し直す
+    const areas = applyRate(await resolveAreas(codes, level), rate);
 
     let competitors = passed;
     let bt = businessTypeId ? getBusinessType(businessTypeId) : null;
@@ -52,6 +55,7 @@ router.post('/', async (req, res) => {
       errors: (inc?.errors || []).slice(0, 5),
     };
     const quotes = getQuotes(areas);
+    scoring.coverRate = rate;
     const explanation = await explainBestArea(scoring, bt?.label ?? '指定業態');
 
     res.json({ businessType: bt, scoring, quotes, explanation });

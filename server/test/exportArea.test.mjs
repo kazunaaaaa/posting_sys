@@ -1,7 +1,7 @@
 // 配布部数表（エリア表）Excel 生成のテスト
 import ExcelJS from 'exceljs';
 import { buildAreaWorkbook, townLabel, cityLabel, copiesLabel, titleFor } from '../services/exportArea.js';
-import { distributionFor } from '../services/distribution.js';
+import { distributionFor, normalizeRate, applyRate } from '../services/distribution.js';
 
 let pass = 0, fail = 0;
 const eq = (label, got, want) => {
@@ -24,6 +24,13 @@ eq('タイトル', titleFor({ storeName: 'Parfait Bar＆VIGO広尾店', projectN
   '【エリア表】_Parfait Bar＆VIGO広尾店様_オープン案件_20000部エリア');
 eq('部数ルール ROUNDDOWN(1708*0.708,-1)=1200', distributionFor(1708, 0.708), 1200);
 eq('部数ルール 3120*0.7 → 2180', distributionFor(3120), 2180);
+eq('カバー率 0.65 はそのまま', normalizeRate(0.65), 0.65);
+eq('カバー率 80（％）→ 0.8', normalizeRate(80), 0.8);
+eq('カバー率 不正値 → 既定0.7', [normalizeRate(''), normalizeRate(-5), normalizeRate('abc'), normalizeRate(500)].join(), '0.7,0.7,0.7,0.7');
+const ra = applyRate([{ code: 'a', households: 1000, distribution: 700 }, { code: 'b', households: null, distribution: null }], 0.55);
+eq('applyRate 1000世帯×55% → 550部', ra[0].distribution, 550);
+eq('applyRate 世帯数なしはそのまま', ra[1].distribution, null);
+
 
 // ワークブック
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
