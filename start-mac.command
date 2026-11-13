@@ -147,7 +147,7 @@ build_client() {
 
 wait_and_open() {
   local i
-  for i in $(seq 1 60); do sleep 1; healthy && { open_url "http://localhost:$PORT"; return 0; }; done
+  for i in $(seq 1 120); do sleep 1; healthy && { open_url "http://localhost:$PORT"; return 0; }; done
   return 1
 }
 
@@ -188,7 +188,8 @@ service_mode() {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S') 自動起動 ==="
   # ログイン直後はネットワークの準備に少し時間がかかることがある
   local i last now
-  for i in $(seq 1 20); do curl -fsI https://codeload.github.com >/dev/null 2>&1 && break; sleep 3; done
+  # （応答の内容は問わず、つながれば次へ。-f を付けるとエラー応答で失敗扱いになるため付けない）
+  for i in $(seq 1 20); do curl -s -o /dev/null --max-time 5 https://codeload.github.com && break; sleep 3; done
   # 直前（10分以内）に更新済みなら取得とビルドを省略（ダブルクリックからの再起動時など）
   last="$(cat "$APP_DIR/.last-update" 2>/dev/null || echo 0)"; now="$(date +%s)"
   if [ -d "$APP_DIR" ] && [ $((now - last)) -lt 600 ]; then
