@@ -7,15 +7,21 @@ function scoreColor(score) {
   return `hsl(${hue}, 80%, 45%)`;
 }
 
-export default function GoogleMapView({ apiKey, center, zoom, polygons, points, competitors, onToggle }) {
+export default function GoogleMapView({
+  apiKey, center, zoom, polygons, points, competitors, circles = [], onToggle, onApi, onCircleChange,
+}) {
   const ref = useRef(null);
   const mapRef = useRef(null);
   const polysRef = useRef([]);
   const pointsRef = useRef([]);
   const markersRef = useRef([]);
+  const circlesRef = useRef({}); // id -> google.maps.Circle
+  const geocoderRef = useRef(null);
   const [loadError, setLoadError] = useState(false);
   const onToggleRef = useRef(onToggle);
+  const onCircleChangeRef = useRef(onCircleChange);
   onToggleRef.current = onToggle;
+  onCircleChangeRef.current = onCircleChange;
 
   useEffect(() => {
     let alive = true;
@@ -28,7 +34,26 @@ export default function GoogleMapView({ apiKey, center, zoom, polygons, points, 
           mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
           gestureHandling: 'greedy',
         });
+        geocoderRef.current = new maps.Geocoder();
+        // 地図操作APIを親へ公開
+        onApi?.({
+          getCenter: () => {
+            const c = mapRef.current.getCenter();
+            return { lat: c.lat(), lng: c.lng() };
+          },
+          panTo: (ll, z) => { mapRef.current.panTo(ll); if (z) mapRef.current.setZoom(z); },
+          geocode: (address) =>
+            new Promise((resolve, reject) => {
+              geocoderRef.current.geocode({ address, region: 'jp' }, (res, status) => {
+                if (status === 'OK' && res[0]) {
+                  const loc = res[0].geometry.location;
+                  resolve({ lat: loc.lat(), lng: loc.lng(), formatted: res[0].formatted_address });
+                } else reject(new Error(status));
+              });
+            }),
+        });
         draw();
+        drawCircles();
       })
       .catch(() => { if (alive) setLoadError(true); });
     return () => { alive = false; };
@@ -90,13 +115,46 @@ export default function GoogleMapView({ apiKey, center, zoom, polygons, points, 
       markersRef.current.push(marker);
     }
 
-    if ((polygons.length || points.length) && !mapRef.current.__fittedKey) {
+    if ((polygons.length || points.length)) {
       const key = polygons.map((p) => p.code).join(',') + '|' + points.length;
       if (key !== mapRef.current.__lastFitKey) { map.fitBounds(bounds); mapRef.current.__lastFitKey = key; }
     }
   }
 
+  // 円の描画・同期（移動/半径変更可）
+  function drawCircles() {
+    const maps = window.google?.maps;
+    if (!maps || !mapRef.current) return;
+    const seen = new Set();
+    for (const c of circles) {
+      seen.add(c.id);
+      let circle = circlesRef.current[c.id];
+      if (!circle) {
+        circle = new maps.Circle({
+          map: mapRef.current, center: { lat: c.lat, lng: c.lng }, radius: c.radiusKm * 1000,
+          strokeColor: '#e5007e', strokeWeight: 2, fillColor: '#e5007e', fillOpacity: 0.08,
+          editable: true, draggable: true, clickable: false,
+        });
+        const sync = () => {
+          const ctr = circle.getCenter();
+          onCircleChangeRef.current?.(c.id, { lat: ctr.lat(), lng: ctr.lng(), radiusKm: circle.getRadius() / 1000 });
+        };
+        circle.addListener('center_changed', sync);
+        circle.addListener('radius_changed', sync);
+        circlesRef.current[c.id] = circle;
+      } else {
+        circle.setCenter({ lat: c.lat, lng: c.lng });
+        circle.setRadius(c.radiusKm * 1000);
+      }
+    }
+    // 削除された円を除去
+    for (const id of Object.keys(circlesRef.current)) {
+      if (!seen.has(id)) { circlesRef.current[id].setMap(null); delete circlesRef.current[id]; }
+    }
+  }
+
   useEffect(() => { draw(); /* eslint-disable-next-line */ }, [polygons, points, competitors]);
+  useEffect(() => { drawCircles(); /* eslint-disable-next-line */ }, [circles]);
 
   if (loadError) {
     return (

@@ -82,6 +82,16 @@ body {
   padding: 5px 12px; font-size: 12px; cursor: pointer;
 }
 .chip:hover { background: #f3f4f6; }
+.chip.solid { background: var(--pink); color: #fff; border-color: var(--pink); }
+.chip.solid:hover { opacity: .9; background: var(--pink); }
+.addrbox { display: inline-flex; gap: 4px; }
+.addrbox input { width: 150px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.circlectl { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.circlectl input { width: 56px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.circlebar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; background: #fff; border-bottom: 1px solid var(--line); }
+.circlechip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; background: #fde7f1; color: var(--pink); border-radius: 999px; padding: 3px 6px 3px 10px; }
+.circlechip button { border: none; background: transparent; color: var(--pink); font-weight: 800; cursor: pointer; font-size: 13px; line-height: 1; }
+.addrmsg { font-size: 12px; color: var(--muted); }
 .spacer { flex: 1; }
 .legend { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
 .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }

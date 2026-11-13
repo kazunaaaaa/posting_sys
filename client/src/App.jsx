@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './lib/api.js';
+import { distanceMeters, uid } from './lib/geo.js';
 import GoogleMapView from './components/GoogleMapView.jsx';
 import SvgMapView from './components/SvgMapView.jsx';
 
@@ -27,6 +28,14 @@ export default function App() {
   const [loading, setLoading] = useState({});
   const [unitCost, setUnitCost] = useState(5.5);
 
+  // 範囲選択（円）
+  const [circles, setCircles] = useState([]); // {id, lat, lng, radiusKm}
+  const [radiusKm, setRadiusKm] = useState(1);
+  const [addrQuery, setAddrQuery] = useState('');
+  const [addrMsg, setAddrMsg] = useState('');
+  const mapApiRef = useRef(null);
+  const handleApi = useCallback((a) => { mapApiRef.current = a; }, []);
+
   useEffect(() => {
     api.config().then(setConfig);
     api.areas().then((d) => { setTownAreas(d.areas); setRate(d.distributionRate); });
@@ -36,7 +45,7 @@ export default function App() {
 
   // モード切替時に選択をリセット
   function switchMode(m) {
-    setMode(m); setSelected([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null);
+    setMode(m); setSelected([]); setCircles([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null);
   }
 
   async function changePref(p) {
@@ -81,7 +90,81 @@ export default function App() {
     }
   }
 
-  function clearAll() { setSelected([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null); }
+  function clearAll() { setSelected([]); setCircles([]); setCompetitors([]); setCompetitorSource(null); setAnalysis(null); }
+
+  // ---- 範囲選択（円） ----
+  // 現在モードの各エリアの中心（町丁目=重心, 市区町村=代表点）
+  const areaCenters = useMemo(() => currentAreas.map((a) => ({
+    code: a.code,
+    lat: mode === 'town' ? a.center.lat : a.lat,
+    lng: mode === 'town' ? a.center.lng : a.lng,
+  })), [currentAreas, mode]);
+
+  function codesInCircle(circle) {
+    return areaCenters
+      .filter((a) => distanceMeters(circle.lat, circle.lng, a.lat, a.lng) <= circle.radiusKm * 1000)
+      .map((a) => a.code);
+  }
+
+  // 市区町村モード: コード群の境界をまとめて取得しキャッシュ
+  async function ensureBoundaries(codes) {
+    if (mode !== 'municipality') return;
+    const missing = codes.filter((c) => !boundaryMap[c]);
+    if (!missing.length) return;
+    try {
+      const d = await api.boundaries(missing);
+      setBoundaryMap((m) => {
+        const next = { ...m };
+        for (const b of d.boundaries) if (b && !b.error) next[b.code] = b;
+        return next;
+      });
+    } catch { /* noop */ }
+  }
+
+  function selectCodes(codes) {
+    if (!codes.length) return;
+    setAnalysis(null);
+    setSelected((prev) => Array.from(new Set([...prev, ...codes])));
+    ensureBoundaries(codes);
+  }
+
+  function addCircleAtCenter() {
+    const c = mapApiRef.current?.getCenter?.();
+    if (!c) return;
+    const circle = { id: uid('circle'), lat: c.lat, lng: c.lng, radiusKm: Number(radiusKm) || 1 };
+    setCircles((prev) => [...prev, circle]);
+    selectCodes(codesInCircle(circle));
+  }
+
+  function onCircleChange(id, next) {
+    setCircles((prev) => prev.map((c) => (c.id === id ? { ...c, ...next } : c)));
+    selectCodes(codesInCircle({ ...next }));
+  }
+
+  function removeCircle(id) {
+    const target = circles.find((c) => c.id === id);
+    const remaining = circles.filter((c) => c.id !== id);
+    setCircles(remaining);
+    if (!target) return;
+    const removed = new Set(codesInCircle(target));
+    const keep = new Set(remaining.flatMap((c) => codesInCircle(c)));
+    setSelected((prev) => prev.filter((code) => keep.has(code) || !removed.has(code)));
+    setAnalysis(null);
+  }
+
+  async function searchAddress(e) {
+    e?.preventDefault?.();
+    const q = addrQuery.trim();
+    if (!q) return;
+    const geocode = mapApiRef.current?.geocode;
+    if (!geocode) { setAddrMsg('住所検索はGoogle Maps接続時に利用できます'); return; }
+    setAddrMsg('検索中…');
+    try {
+      const r = await geocode(q);
+      mapApiRef.current.panTo({ lat: r.lat, lng: r.lng }, 14);
+      setAddrMsg(r.formatted || '移動しました');
+    } catch { setAddrMsg('住所が見つかりませんでした'); }
+  }
 
   async function loadCompetitors() {
     if (!businessTypeId || !selected.length) return;
@@ -214,12 +297,33 @@ export default function App() {
         {/* 中央: 地図 */}
         <main className="mapwrap">
           <div className="maptoolbar">
+            <form className="addrbox" onSubmit={searchAddress}>
+              <input placeholder="住所・地名で移動" value={addrQuery} onChange={(e) => setAddrQuery(e.target.value)} />
+              <button type="submit" className="chip">🔍</button>
+            </form>
+            <span className="circlectl">
+              半径
+              <input type="number" min="0.2" step="0.1" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
+              km
+              <button className="chip solid" onClick={addCircleAtCenter}>⊕ 地図中心に円を追加</button>
+            </span>
             <button className="chip" onClick={clearAll}>クリア</button>
             <span className="spacer" />
             <LegendDot color="#e5007e" label="選択エリア" />
             <LegendDot color="#7c3aed" label="競合" />
             {analysis && <LegendGradient />}
           </div>
+          {(circles.length > 0 || addrMsg) && (
+            <div className="circlebar">
+              {circles.map((c, i) => (
+                <span key={c.id} className="circlechip">
+                  円{i + 1}（{c.radiusKm}km）
+                  <button onClick={() => removeCircle(c.id)}>×</button>
+                </span>
+              ))}
+              {addrMsg && <span className="addrmsg">{addrMsg}</span>}
+            </div>
+          )}
           <div className="mapbox">
             <MapComp
               apiKey={config?.googleMapsApiKey}
@@ -228,8 +332,11 @@ export default function App() {
               polygons={mapPolygons}
               points={mapPoints}
               competitors={competitors}
+              circles={circles}
               businessIcon={businessIcon}
               onToggle={toggle}
+              onApi={handleApi}
+              onCircleChange={onCircleChange}
               emptyHint={mode === 'municipality' ? '都道府県を選び、自治体を選択してください' : 'エリアを選択してください'}
             />
           </div>

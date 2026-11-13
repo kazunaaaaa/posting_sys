@@ -1,18 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 // Google Maps キー未設定時のフォールバック簡易地図（SVG）。
-// polygons(複数リング) + points(クリック可能な候補重心) + competitors を等距離近似で投影。
+// polygons(複数リング) + points(候補重心) + competitors + circles(範囲円) を等距離近似で投影。
 function scoreColor(score) {
   if (score == null) return '#e5007e';
   const hue = (score / 100) * 120;
   return `hsl(${hue}, 80%, 45%)`;
 }
 
-export default function SvgMapView({ polygons, points, competitors, businessIcon, onToggle, emptyHint }) {
+export default function SvgMapView({
+  polygons, points, competitors, circles = [], businessIcon, onToggle, onApi, emptyHint,
+}) {
   const [hover, setHover] = useState(null);
   const W = 900, H = 640, pad = 44;
 
-  const project = useMemo(() => {
+  const proj = useMemo(() => {
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     const acc = (lng, lat) => {
       minLng = Math.min(minLng, lng); minLat = Math.min(minLat, lat);
@@ -21,6 +23,7 @@ export default function SvgMapView({ polygons, points, competitors, businessIcon
     for (const p of polygons) for (const ring of p.rings) for (const [lng, lat] of ring) acc(lng, lat);
     for (const p of points) acc(p.lng, p.lat);
     for (const c of competitors) acc(c.lng, c.lat);
+    for (const c of circles) acc(c.lng, c.lat);
     if (!Number.isFinite(minLng)) return null;
     const latMid = (minLat + maxLat) / 2;
     const cosLat = Math.cos((latMid * Math.PI) / 180);
@@ -29,21 +32,30 @@ export default function SvgMapView({ polygons, points, competitors, businessIcon
     const scale = Math.min((W - pad * 2) / spanX, (H - pad * 2) / spanY);
     const offX = (W - spanX * scale) / 2;
     const offY = (H - spanY * scale) / 2;
-    return (lng, lat) => ({
+    const project = (lng, lat) => ({
       x: offX + (lng - minLng) * cosLat * scale,
       y: H - (offY + (lat - minLat) * scale),
     });
-  }, [polygons, points, competitors]);
+    const mToPx = scale / 111320; // メートル→ピクセル（緯度基準の近似）
+    return { project, mToPx, center: { lat: latMid, lng: (minLng + maxLng) / 2 } };
+  }, [polygons, points, competitors, circles]);
 
-  if (!project) {
-    return <div className="mapempty">{emptyHint || 'エリアを選択してください'}</div>;
-  }
+  // 地図API（中心取得）を親へ公開。SVGは住所ジオコーディング非対応。
+  useEffect(() => {
+    onApi?.({
+      getCenter: () => proj?.center ?? { lat: 35.68, lng: 139.76 },
+      panTo: () => {},
+      geocode: null,
+    });
+  }, [proj, onApi]);
+
+  if (!proj) return <div className="mapempty">{emptyHint || 'エリアを選択してください'}</div>;
+  const { project, mToPx } = proj;
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#eef2f5' }}>
       <div className="svgmap-badge">デモ地図（Google Maps キー未設定）</div>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: '100%' }}>
-        {/* 候補ポイント（クリックで選択） */}
         {points.map((p) => {
           const s = project(p.lng, p.lat);
           return (
@@ -54,7 +66,6 @@ export default function SvgMapView({ polygons, points, competitors, businessIcon
             </g>
           );
         })}
-        {/* ポリゴン */}
         {polygons.map((p) => {
           const isSel = p.selected;
           const c = p.center ? project(p.center.lng, p.center.lat) : null;
@@ -78,7 +89,14 @@ export default function SvgMapView({ polygons, points, competitors, businessIcon
             </g>
           );
         })}
-        {/* 競合 */}
+        {/* 範囲円 */}
+        {circles.map((c) => {
+          const s = project(c.lng, c.lat);
+          return (
+            <circle key={'cir-' + c.id} cx={s.x} cy={s.y} r={Math.max(4, c.radiusKm * 1000 * mToPx)}
+              fill="#e5007e" fillOpacity="0.07" stroke="#e5007e" strokeWidth="2" strokeDasharray="6 4" pointerEvents="none" />
+          );
+        })}
         {competitors.map((c) => {
           const s = project(c.lng, c.lat);
           return (
