@@ -21,6 +21,19 @@
 
 ![circle](docs/screenshot-circle.png)
 
+## Macでのかんたん起動（おすすめ）
+ターミナルに次の1行を貼り付けて実行すると、デスクトップに「ポスティング起動」ができ、そのまま起動します（初回のみ）。
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazunaaaaa/posting_sys/claude/posting-area-distribution-s7c07d/start-mac.command -o ~/Desktop/ポスティング起動.command && chmod +x ~/Desktop/ポスティング起動.command && open ~/Desktop/ポスティング起動.command
+```
+以降は **デスクトップの「ポスティング起動」をダブルクリック** するだけで、次を自動で行います（`start-mac.command`）。
+1. 最新のコードをGitHubから取得（`.env`・インストール済みの部品・取得済みデータは残す）
+2. 部品のインストール
+3. 町丁目データの事前取得（既定は一都三県。取得済みはスキップ）
+4. アプリを起動して http://localhost:4000 をブラウザで開く（止めるときは Ctrl + C）
+
+全国のデータを取得したいときは、一度だけ `PREFETCH_AREA=全国 bash ~/Desktop/ポスティング起動.command` を実行します。
+
 ## クイックスタート
 
 ```bash
