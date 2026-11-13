@@ -27,12 +27,22 @@
 curl -fsSL https://raw.githubusercontent.com/kazunaaaaa/posting_sys/claude/posting-area-distribution-s7c07d/start-mac.command -o ~/Desktop/ポスティング起動.command && chmod +x ~/Desktop/ポスティング起動.command && open ~/Desktop/ポスティング起動.command
 ```
 以降は **デスクトップの「ポスティング起動」をダブルクリック** するだけで、次を自動で行います（`start-mac.command`）。
-1. 最新のコードをGitHubから取得（`.env`・インストール済みの部品・取得済みデータは残す）
+1. 最新のコードをGitHubから取得して `~/posting-sys` に配置（`.env`・インストール済みの部品・取得済みデータは残す）
 2. 部品のインストール
 3. 町丁目データの事前取得（既定は一都三県。取得済みはスキップ）
 4. アプリを起動して http://localhost:4000 をブラウザで開く（止めるときは Ctrl + C）
 
 全国のデータを取得したいときは、一度だけ `PREFETCH_AREA=全国 bash ~/Desktop/ポスティング起動.command` を実行します。
+
+**Macログイン時に自動で起動する**（一度だけ実行）:
+```bash
+bash ~/Desktop/ポスティング起動.command --install-autostart     # 登録（ブラウザも自動で開く。開かない場合は --no-browser を付ける）
+bash ~/Desktop/ポスティング起動.command --status                # 状態の確認
+bash ~/Desktop/ポスティング起動.command --uninstall-autostart   # 解除
+```
+- ログイン時に、最新コードの取得 → 起動 → ブラウザ表示を自動で行い、町丁目データの事前取得は裏で進めます。落ちた場合は自動で再起動します。
+- アプリ本体は `~/posting-sys` に置きます（自動起動のプログラムはmacOSの保護によりデスクトップを読めないことがあるため）。`.env` はデスクトップの旧フォルダから自動で引き継ぎます。
+- ログ: `~/Library/Logs/posting-sys.log`（事前取得は `posting-sys-prefetch.log`）
 
 ## クイックスタート
 
