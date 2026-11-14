@@ -278,11 +278,19 @@ export default function App() {
     selectCodes(codes);
   }
 
+  // AI・部数指定で選んだエリアに付ける円（選択は変えない。動かすと通常の円として範囲内を選択）
+  function autoCircle(center, maxDistanceKm, codes, tag) {
+    const radiusKm = Math.max(0.1, Math.ceil((Number(maxDistanceKm) || 0.1) * 10) / 10);
+    return { id: uid('circle'), lat: center.lat, lng: center.lng, radiusKm, codes: [...codes], tag };
+  }
+
   function onCircleChange(id, next) {
     const all = circlesRef.current;
     const cur = all.find((c) => c.id === id);
     if (!cur) return;
-    const moved = { ...cur, ...next };
+    // 変化のない通知（地図側の再描画など）は無視
+    if (Math.abs(cur.lat - next.lat) < 1e-9 && Math.abs(cur.lng - next.lng) < 1e-9 && Math.abs(cur.radiusKm - next.radiusKm) < 0.005) return;
+    const moved = { ...cur, ...next, tag: undefined };
     const newCodes = codesInCircle(moved);
     const newSet = new Set(newCodes);
     const others = new Set(all.filter((c) => c.id !== id).flatMap((c) => c.codes || []));
@@ -369,7 +377,8 @@ export default function App() {
       });
       if (!r.codes?.length) { setCountMsg('最適エリアを作成できませんでした（候補の町丁目がありません）'); return; }
       setSelected(r.codes);
-      setCircles([]);
+      // 作成したエリアを囲む円（ピン中心・最も遠い町丁目の中心までの半径）
+      setCircles([autoCircle(p, r.maxDistanceKm, r.codes, 'AI')]);
       setBarriers(r.barriers || []);
       setOptResult({ ...r, failed: [...failed], center: { ...p } });
       setCountMsg(`🤖 最適エリアを作成しました: 約${target.toLocaleString()}部 → ${r.sum.toLocaleString()}部（${r.codes.length}エリア・半径約${r.maxDistanceKm}km）`);
@@ -404,6 +413,7 @@ export default function App() {
       }
       if (!r.codes.length) { setCountMsg('追加できる町丁目が見つかりませんでした'); return; }
       selectCodes(r.codes);
+      setCircles((prev) => [...prev, autoCircle(p, r.maxDistanceKm, r.codes, `${target.toLocaleString()}部`)]);
       setCountMsg(`📍から約${target.toLocaleString()}部 → ${r.sum.toLocaleString()}部（${r.codes.length}エリア・半径約${r.maxDistanceKm}km）を追加しました`
         + (failed.size ? `\n※ 読み込めなかった市区町村: ${[...failed].join('、')}` : ''));
     } catch (e) {
@@ -437,7 +447,7 @@ export default function App() {
   async function downloadAreaTable() {
     if (!selectedAreas.length) return;
     setLoading((l) => ({ ...l, export: true }));
-    setExportMsg('地図画像を作成中…');
+    setExportMsg('準備中…');
     try {
       const ordered = [...selectedAreas].sort((a, b) => String(a.code).localeCompare(String(b.code)));
       const isTown = mode === 'town';
@@ -448,16 +458,6 @@ export default function App() {
       }));
       if (rows.some((r) => r.households == null)) throw new Error('世帯数が未取得のエリアがあります（e-Stat接続が必要）');
 
-      let map = null;
-      try {
-        const areas = ordered.map((a) => (isTown
-          ? { rings: a.polygons ?? [a.polygon], center: a.center, name: a.name }
-          : boundaryMap[a.code] && { rings: boundaryMap[a.code].polygons, center: boundaryMap[a.code].center, name: a.city })).filter(Boolean);
-        map = await buildMapImage({ areas, circles, pin, pinLabel: storeName, labelOf: isTown ? townLabel : (n) => n });
-      } catch (e) {
-        console.warn('map image failed', e);
-      }
-
       // AI分析レポート（別シート）: 選択が分析時から変わっていれば分析し直す
       let rep = analysis;
       const sameSet = (a, b) => a && b && a.length === b.length && a.every((c) => b.includes(c));
@@ -467,9 +467,38 @@ export default function App() {
       }
       const report = rep ? buildReport(rep, sameSet(optResult?.codes, selected) ? optResult : null) : null;
 
+      // エリア表のターゲット人数・占有率（全年齢・男女ともの場合は意味がないので出さない）
+      const tt = rep?.scoring?.totals;
+      const prof = rep?.scoring?.targetProfile;
+      const allPeople = prof && prof.ageMin === 0 && prof.ageMax >= 120 && prof.sex === 'all';
+      const target = isTown && tt?.target > 0 && !allPeople ? {
+        label: prof?.label,
+        people: tt.target,
+        share: tt.targetPopulation ? tt.target / tt.targetPopulation : null,
+        note: rep.scoring.targetSource === 'census' ? '国勢調査より' : '一部推計',
+      } : null;
+
+      // 地図画像（選択エリア・円・ピン・競合）
+      setExportMsg('地図画像を作成中…');
+      let map = null;
+      const comps = rep?.competitors ?? competitors;
+      try {
+        const areas = ordered.map((a) => (isTown
+          ? { rings: a.polygons ?? [a.polygon], center: a.center, name: a.name }
+          : boundaryMap[a.code] && { rings: boundaryMap[a.code].polygons, center: boundaryMap[a.code].center, name: a.city })).filter(Boolean);
+        const bt = businessTypes.find((b) => b.id === businessTypeId);
+        map = await buildMapImage({
+          areas, circles, pin, pinLabel: storeName, labelOf: isTown ? townLabel : (n) => n,
+          competitors: comps, competitorLabel: bt ? `競合：${bt.label}` : '競合',
+        });
+      } catch (e) {
+        console.warn('map image failed', e);
+      }
+
       setExportMsg('Excelを作成中…');
       const { blob, filename } = await api.exportAreaXlsx({
         report,
+        target,
         rows,
         coverRate: rate,
         storeName,
@@ -512,7 +541,7 @@ export default function App() {
         comps = r.competitors; setCompetitors(comps); setCompetitorSource(r.source);
       }
       const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload(), incomePref, rate);
-      const withCodes = { ...res, codes: [...codes], incomePref };
+      const withCodes = { ...res, codes: [...codes], incomePref, competitors: comps };
       setAnalysis(withCodes);
       return withCodes;
     } finally { setLoading((l) => ({ ...l, analyze: false })); }
@@ -751,7 +780,7 @@ export default function App() {
             <div className="circlebar">
               {circles.map((c, i) => (
                 <span key={c.id} className="circlechip">
-                  円{i + 1}（{c.radiusKm}km）
+                  円{i + 1}（{c.radiusKm}km{c.tag ? `・${c.tag}` : ''}）
                   <button onClick={() => removeCircle(c.id)}>×</button>
                 </span>
               ))}

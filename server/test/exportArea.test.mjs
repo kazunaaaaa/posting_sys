@@ -75,6 +75,21 @@ eq('画像の大きさ(EMU) 幅1001px', /<xdr:ext cx="9534525"/.test(drawingXml)
 
 // 地図なしでも出力できる
 const noMap = await buildAreaWorkbook({ rows });
+
+// ターゲット（人数・占有率）の2行
+const withT = await buildAreaWorkbook({ rows, target: { label: '20〜59歳の女性', people: 7611.4, share: 0.243, note: '国勢調査' } });
+const wbT = new ExcelJS.Workbook();
+await wbT.xlsx.load(withT.buffer);
+const wsT = wbT.worksheets[0];
+eq('ターゲット人数 F3', [wsT.getCell('C3').value, wsT.getCell('F3').value, wsT.getCell('F3').numFmt], ['ターゲット（20〜59歳の女性）：', 7611, '"約"#,##0"人"']);
+eq('ターゲット占有率 F4', [wsT.getCell('C4').value, wsT.getCell('F4').value, wsT.getCell('F4').numFmt], ['ターゲット占有率（人口比）：', 0.243, '0.0%']);
+eq('見出しは5行目に下がる', ['B5', 'F5'].map((a) => wsT.getCell(a).value), ['市区町村名', '備考']);
+eq('1行目のエリアは6行目・式も追従', wsT.getCell('E6').formula, 'ROUNDDOWN(D6*$F$1,-1)');
+eq('合計部数の式も追従', wsT.getCell('F2').formula, `E${6 + rows.length}&"部"`);
+eq('ウィンドウ枠の固定も5行目まで', wsT.views[0].ySplit, 5);
+const zeroT = await buildAreaWorkbook({ rows, target: { label: 'x', people: 0 } });
+const wbZ = new ExcelJS.Workbook(); await wbZ.xlsx.load(zeroT.buffer);
+eq('ターゲット0人なら行を足さない', wbZ.worksheets[0].getCell('B3').value, '市区町村名');
 eq('地図なしでも出力', noMap.buffer.length > 1000, true);
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAIL'}  (${pass} passed, ${fail} failed)`);

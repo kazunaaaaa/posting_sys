@@ -91,7 +91,7 @@ async function loadBaseMap(center, zoom) {
  * @param {string} [p.pinLabel] 店名など
  * @param {(name:string)=>string} [p.labelOf]
  */
-export async function buildMapImage({ areas, circles = [], pin = null, pinLabel = '', labelOf = townLabel }) {
+export async function buildMapImage({ areas, circles = [], pin = null, pinLabel = '', labelOf = townLabel, competitors = [], competitorLabel = '競合' }) {
   const pts = [];
   for (const a of areas) for (const ring of a.rings) for (const [lng, lat] of ring) pts.push({ lat, lng });
   for (const c of circles) {
@@ -154,6 +154,18 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
     drawLabel(ctx, text, p.x, p.y, { size: fitFontSize(ctx, text, (maxX - minX) * 0.95) });
   }
 
+  // 競合店舗（紫の点）。地図の範囲に入るものだけ描く（範囲は選択エリアに合わせたまま）
+  let compShown = 0;
+  for (const c of competitors) {
+    if (!Number.isFinite(c?.lat) || !Number.isFinite(c?.lng)) continue;
+    const p = project(c.lat, c.lng);
+    if (p.x < 0 || p.y < 0 || p.x > canvas.width || p.y > canvas.height) continue;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5.5 * SCALE, 0, Math.PI * 2);
+    ctx.fillStyle = '#7c3aed'; ctx.fill();
+    ctx.lineWidth = 1.6 * SCALE; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+    compShown++;
+  }
+
   // 半径ラベルは町名より手前に
   for (const l of circleLabels) drawLabel(ctx, l.text, l.x, l.y, { size: 11, border: '#ef1c1c', color: '#b91c1c' });
 
@@ -163,6 +175,12 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
     drawPin(ctx, p.x, p.y);
     if (pinLabel) drawLabel(ctx, pinLabel, p.x, p.y + 14 * SCALE, { bg: '#fff59d', border: '#8a6d00', size: 12 });
   }
+
+  // 凡例（左下）
+  const legend = [{ type: 'area', text: '配布エリア' }];
+  if (circles.length) legend.push({ type: 'circle', text: '半径' });
+  if (compShown) legend.push({ type: 'comp', text: `${competitorLabel}（${compShown}件）` });
+  if (competitors.length || circles.length) drawLegend(ctx, legend, 10 * SCALE, canvas.height - 10 * SCALE);
 
   if (!baseMap) {
     drawLabel(ctx, '背景地図なし（Maps Static API を確認）', canvas.width - 150 * SCALE, canvas.height - 14 * SCALE, { size: 10, bg: '#fff', border: '#999', color: '#555' });
@@ -174,5 +192,32 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
     height: canvas.height,
     baseMap,
     baseError,
+    competitorsShown: compShown,
   };
+}
+
+function drawLegend(ctx, items, x, bottom) {
+  const fs = 11 * SCALE, row = 18 * SCALE, pad = 7 * SCALE, icon = 16 * SCALE;
+  ctx.font = `bold ${fs}px ${FONT}`;
+  const w = Math.max(...items.map((i) => ctx.measureText(i.text).width)) + icon + pad * 3;
+  const h = items.length * row + pad * 2 - 4 * SCALE;
+  const y0 = bottom - h;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fillRect(x, y0, w, h);
+  ctx.lineWidth = 1 * SCALE; ctx.strokeStyle = '#999'; ctx.strokeRect(x, y0, w, h);
+  items.forEach((it, i) => {
+    const cy = y0 + pad + i * row + row / 2 - 2 * SCALE;
+    const ix = x + pad;
+    if (it.type === 'area') {
+      ctx.fillStyle = 'rgba(249,115,22,0.5)'; ctx.fillRect(ix, cy - 5 * SCALE, icon, 10 * SCALE);
+      ctx.strokeStyle = '#7c2d12'; ctx.strokeRect(ix, cy - 5 * SCALE, icon, 10 * SCALE);
+    } else if (it.type === 'circle') {
+      ctx.beginPath(); ctx.arc(ix + icon / 2, cy, 6 * SCALE, 0, Math.PI * 2);
+      ctx.lineWidth = 2.5 * SCALE; ctx.strokeStyle = '#ef1c1c'; ctx.stroke(); ctx.lineWidth = 1 * SCALE;
+    } else {
+      ctx.beginPath(); ctx.arc(ix + icon / 2, cy, 5 * SCALE, 0, Math.PI * 2);
+      ctx.fillStyle = '#7c3aed'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.stroke();
+    }
+    ctx.fillStyle = '#222'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(it.text, ix + icon + pad, cy);
+  });
 }

@@ -72,11 +72,15 @@ export async function buildAreaWorkbook(p) {
   const copies = Number(p.targetCopies) > 0 ? Number(p.targetCopies) : totalCopies;
   const title = titleFor({ storeName: p.storeName, projectName: p.projectName, copies });
 
+  // ターゲット（人数・占有率）があれば、合計部数の下に2行追加して見出し以降を2行下げる
+  const tgt = p.target && Number(p.target.people) > 0 ? p.target : null;
+  const extra = tgt ? 2 : 0;
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'posting-sys';
   wb.created = new Date();
   const ws = wb.addWorksheet(sheetNameFor(copies), {
-    views: [{ state: 'frozen', ySplit: 3 }],
+    views: [{ state: 'frozen', ySplit: 3 + extra }],
     pageSetup: {
       paperSize: 9, orientation: 'portrait',
       margins: { left: 0.7087, right: 0.7087, top: 0.748, bottom: 0.748, header: 0.315, footer: 0.315 },
@@ -100,7 +104,8 @@ export async function buildAreaWorkbook(p) {
   };
 
   // 1〜2行目: タイトル・カバー率・合計部数
-  const first = 4;
+  const head = 3 + extra;
+  const first = head + 1;
   const last = first + rows.length - 1;
   const totalRow = last + 1;
   ws.mergeCells('B1:D1');
@@ -111,9 +116,22 @@ export async function buildAreaWorkbook(p) {
   set('F2', { formula: `E${totalRow}&"部"`, result: `${totalCopies}部` }, { alignment: { horizontal: 'center' }, numFmt: '#,##0' });
 
   // 3行目: 見出し
-  ws.getRow(3).height = 24;
-  [['B3', '市区町村名'], ['C3', '町丁目名'], ['D3', '世帯数'], ['E3', '配布予定数'], ['F3', '備考']].forEach(([a, v]) =>
-    set(a, v, { border: true, fill: true, alignment: { horizontal: a === 'F3' ? 'left' : 'center' } }));
+  // 3〜4行目（ターゲット指定時）: ターゲット人数・占有率（人口に占める割合）
+  if (tgt) {
+    ws.mergeCells('C3:E3');
+    set('C3', `ターゲット（${tgt.label || '指定属性'}）：`, { alignment: { horizontal: 'right' } });
+    set('F3', Math.round(Number(tgt.people)), { alignment: { horizontal: 'center' }, numFmt: '"約"#,##0"人"' });
+    ws.mergeCells('C4:E4');
+    set('C4', 'ターゲット占有率（人口比）：', { alignment: { horizontal: 'right' } });
+    const share = Number(tgt.share);
+    set('F4', Number.isFinite(share) && share > 0 ? share : null, { alignment: { horizontal: 'center' }, numFmt: '0.0%' });
+    if (tgt.note) set('G3', tgt.note, { alignment: { horizontal: 'left' } }).font = { ...FONT, size: 9, color: { argb: 'FF7F7F7F' } };
+  }
+
+  // 見出し
+  ws.getRow(head).height = 24;
+  [['B', '市区町村名'], ['C', '町丁目名'], ['D', '世帯数'], ['E', '配布予定数'], ['F', '備考']].forEach(([col, v]) =>
+    set(`${col}${head}`, v, { border: true, fill: true, alignment: { horizontal: col === 'F' ? 'left' : 'center' } }));
 
   // 4行目〜: エリア
   rows.forEach((r, i) => {
@@ -140,7 +158,7 @@ export async function buildAreaWorkbook(p) {
     const id = wb.addImage({ base64: m[2], extension: m[1] === 'jpeg' ? 'jpeg' : 'png' });
     const w = 1001;
     const ratio = p.mapSize?.width ? p.mapSize.height / p.mapSize.width : 809 / 1001;
-    ws.addImage(id, { tl: { col: 6, row: 3 }, ext: { width: w, height: Math.round(w * ratio) } });
+    ws.addImage(id, { tl: { col: 6, row: head }, ext: { width: w, height: Math.round(w * ratio) } });
   }
 
   const reportSheet = p.report ? addReportSheet(wb, p.report, { title, totalCopies, rate }) : null;

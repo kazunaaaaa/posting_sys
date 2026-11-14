@@ -160,7 +160,11 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
       distribution: areas.reduce((s, a) => s + a.distribution, 0),
       competitors: competitors.length,
       estimatedCost: scored.reduce((s, a) => s + a.estimatedCost, 0),
-      ...(hasTarget ? { target: scored.reduce((s, a) => s + (a.target || 0), 0) } : {}),
+      ...(hasTarget ? {
+        target: scored.reduce((s, a) => s + (a.target || 0), 0),
+        // 人口（ターゲット占有率の分母）
+        targetPopulation: areas.reduce((s, a) => s + (targets[a.code]?.population || 0), 0),
+      } : {}),
     },
   };
 }
