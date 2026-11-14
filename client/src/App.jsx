@@ -581,7 +581,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="logo">📮 ポスティング配布エリア選択</div>
-        <div className="tagline">世帯数×{Math.round(rate * 1000) / 10}%の配布部数 ／ 競合分析 ／ AI最適エリア ／ 配布会社見積</div>
+        <div className="tagline">競合分析 ／ AI最適エリア ／ 見積 ／ エリア表DL</div>
       </header>
 
       <div className="layout">
