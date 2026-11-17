@@ -102,6 +102,15 @@ self_update() {
   esac
 }
 
+# デスクトップの「ポスティング起動」が無くなっていたら作り直す
+ensure_shortcut() {
+  local dest="$HOME/Desktop/ポスティング起動.command"
+  [ -d "$HOME/Desktop" ] || return 0
+  [ -e "$dest" ] && return 0
+  [ -f "$APP_DIR/start-mac.command" ] || return 0
+  cp "$APP_DIR/start-mac.command" "$dest" 2>/dev/null && chmod +x "$dest" && ok "デスクトップに「ポスティング起動」を作り直しました"
+}
+
 ensure_env() {
   say "APIキーの設定を確認"
   local f
@@ -157,6 +166,7 @@ interactive_mode() {
   check_node
   update_code
   self_update
+  ensure_shortcut
   ensure_env
   install_deps
   prefetch_fg
