@@ -276,10 +276,15 @@ export default function App() {
   }
 
   // 円は「その円で選んだコード(codes)」を保持し、移動・縮小で外れたものだけ解除する
-  function addCircleAtPin() {
+  // drawOnly=true のときは円を描くだけ（エリアは選択しない。動かしても選択は変わらない）
+  function addCircleAtPin(drawOnly = false) {
     const c = ensurePin();
     if (!c) return;
     const circle = { id: uid('circle'), lat: c.lat, lng: c.lng, radiusKm: Number(radiusKm) || 1 };
+    if (drawOnly === true) {
+      setCircles((prev) => [...prev, { ...circle, codes: [], drawOnly: true }]);
+      return;
+    }
     const codes = codesInCircle(circle);
     setCircles((prev) => [...prev, { ...circle, codes }]);
     selectCodes(codes);
@@ -297,6 +302,12 @@ export default function App() {
     if (!cur) return;
     // 変化のない通知（地図側の再描画など）は無視
     if (Math.abs(cur.lat - next.lat) < 1e-9 && Math.abs(cur.lng - next.lng) < 1e-9 && Math.abs(cur.radiusKm - next.radiusKm) < 0.005) return;
+    if (cur.drawOnly) { // 表示のみの円は位置・大きさだけ更新
+      const updated = all.map((c) => (c.id === id ? { ...cur, ...next } : c));
+      circlesRef.current = updated;
+      setCircles(updated);
+      return;
+    }
     const moved = { ...cur, ...next, tag: undefined };
     const newCodes = codesInCircle(moved);
     const newSet = new Set(newCodes);
@@ -861,7 +872,8 @@ export default function App() {
               円選択　半径
               <input type="number" min="0.2" step="0.1" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
               km
-              <button className="chip red" onClick={addCircleAtPin}>円を追加</button>
+              <button className="chip red" onClick={() => addCircleAtPin(false)} title="円を描き、円の中の町丁目を選択します">円を追加</button>
+              <button className="chip redline" onClick={() => addCircleAtPin(true)} title="円を描くだけで、エリアは選択しません">円のみ</button>
             </span>
             {mode === 'town' && (
               <span className="countctl">
@@ -882,7 +894,7 @@ export default function App() {
             <div className="circlebar">
               {circles.map((c, i) => (
                 <span key={c.id} className="circlechip">
-                  円{i + 1}（{c.radiusKm}km{c.tag ? `・${c.tag}` : ''}）
+                  円{i + 1}（{c.radiusKm}km{c.drawOnly ? '・円のみ' : c.tag ? `・${c.tag}` : ''}）
                   <button onClick={() => removeCircle(c.id)}>×</button>
                 </span>
               ))}

@@ -201,3 +201,5 @@ body {
 .pasteresult .ok { color: #047857; font-weight: 700; }
 .warnbox { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 12px; color: #92400e; }
 .warnbox ul { margin: 4px 0 4px 16px; padding: 0; }
+.chip.redline { background: #fff; color: #ef1c1c; border-color: #ef1c1c; }
+.chip.redline:hover { background: #fef2f2; }
