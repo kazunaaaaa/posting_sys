@@ -74,6 +74,13 @@ export default function App() {
   const [titleCopies, setTitleCopies] = useState(''); // 空なら合計を1,000部単位に丸めた値
   const [exportMsg, setExportMsg] = useState('');
 
+  // エリア表の貼り付け（Excelからコピー → 地図に反映）
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteReplace, setPasteReplace] = useState(true);   // 今の選択を置き換える
+  const [pasteUseHh, setPasteUseHh] = useState(true);       // 貼り付けた世帯数を使う
+  const [pasteResult, setPasteResult] = useState(null);
+
   // 非同期処理の途中でも最新の町丁目を参照するための参照
   const townAreasRef = useRef(townAreas);
   townAreasRef.current = townAreas;
@@ -328,6 +335,65 @@ export default function App() {
       setPin(p); // 検索した住所に中心地のピンを立てる
       setAddrMsg(`📍 ${r.formatted || q}`);
     } catch { setAddrMsg('住所が見つかりませんでした'); }
+  }
+
+  // ---- 📋 エリア表の貼り付け → 地図に反映（その後クリック・円で調整できる）----
+  async function importAreaTable() {
+    if (!pasteText.trim() || mode !== 'town') return;
+    setLoading((l) => ({ ...l, import: true }));
+    setPasteResult({ msg: '照合中…' });
+    try {
+      const r = await api.importAreaTable(pasteText);
+      const failedCities = [];
+      for (const c of r.cities || []) {
+        try { await loadTownCity(c.code, c.name, { quiet: true }); } catch { failedCities.push(c.name); }
+      }
+      // 貼り付けた世帯数で置き換え（1行 = 1町丁目に対応したものだけ）
+      let overridden = 0;
+      if (pasteUseHh) {
+        const hh = new Map();
+        for (const m of r.matched) if (m.codes.length === 1 && m.households > 0) hh.set(m.codes[0], m.households);
+        if (hh.size) {
+          townAreasRef.current = townAreasRef.current.map((t) => {
+            if (!hh.has(t.code)) return t;
+            overridden++;
+            return withRate({ ...t, households: hh.get(t.code), estatHouseholds: t.estatHouseholds ?? t.households, hhSource: 'paste' }, rateRef.current);
+          });
+          setTownAreas(townAreasRef.current);
+        }
+      }
+      const codes = [...new Set(r.matched.flatMap((m) => m.codes))];
+      setAnalysis(null);
+      if (pasteReplace) {
+        setSelected(codes); setCircles([]); setOptResult(null); setBarriers([]);
+      } else selectCodes(codes);
+
+      // 表の上にあった住所に中心地のピンを立てる
+      let pinMsg = '';
+      if (r.address) {
+        const geocode = mapApiRef.current?.geocode;
+        if (geocode) {
+          try {
+            const g = await geocode(r.address);
+            setPin({ lat: g.lat, lng: g.lng });
+            pinMsg = `📍 ${r.address} にピンを立てました`;
+          } catch { pinMsg = `住所「${r.address}」が見つかりませんでした`; }
+        } else pinMsg = `住所「${r.address}」（ピンはGoogle Maps接続時に立てられます）`;
+      }
+      const byCode = new Map(townAreasRef.current.map((t) => [t.code, t]));
+      const copies = codes.reduce((s, c) => s + (byCode.get(c)?.distribution || 0), 0);
+      const pastedCopies = r.matched.reduce((s, m) => s + (m.copies || 0), 0);
+      setPasteResult({
+        ok: true,
+        msg: `✅ ${r.rowCount}行中 ${r.matched.length}行を地図に反映しました（${codes.length}町丁目・${copies.toLocaleString()}部）`,
+        pastedCopies, overridden, pinMsg,
+        unmatched: r.unmatched, notes: [...(r.notes || []), ...failedCities.map((c) => `${c}の町丁目を読み込めませんでした`)],
+      });
+    } catch (e) {
+      setPasteResult({ msg: `反映できませんでした: ${e.message}` });
+    } finally {
+      setLoading((l) => ({ ...l, import: false }));
+    }
   }
 
   // ---- 「📍から約 N 部を追加」----
@@ -644,7 +710,43 @@ export default function App() {
                 市区町村を指定して読み込み、町丁目をクリックや円で選ぶこともできます。世帯数は令和2年国勢調査（町丁・字等別）。
               </div>
             </Section>
-          ) : (
+          ) : null}
+          {mode === 'town' && (
+            <Section title="📋 エリア表を貼り付けて反映">
+              {!pasteOpen ? (
+                <button className="btn ghost" onClick={() => setPasteOpen(true)}>Excelのエリア表を貼り付ける</button>
+              ) : (
+                <>
+                  <textarea className="pastebox" rows={7} value={pasteText} onChange={(e) => setPasteText(e.target.value)}
+                    placeholder={'Excelで「都道府県・市区町村・町丁目名・世帯数・配布予定数」の範囲を選んでコピーし、ここに貼り付け\n例）\n坂戸市北峰183-2\n都道府県\t市区町村\t町丁目名\t一般世帯数\t配布予定数\n埼玉県\t坂戸市\t日の出町\t1137\t790'} />
+                  <label className="checkline"><input type="checkbox" checked={pasteReplace} onChange={(e) => setPasteReplace(e.target.checked)} />今の選択を置き換える（外すと追加）</label>
+                  <label className="checkline"><input type="checkbox" checked={pasteUseHh} onChange={(e) => setPasteUseHh(e.target.checked)} />貼り付けた世帯数を使う（外すと国勢調査の世帯数）</label>
+                  <div className="pastebtns">
+                    <button className="btn primary" disabled={!pasteText.trim() || loading.import} onClick={importAreaTable}>
+                      {loading.import ? '反映中…' : '地図に反映'}
+                    </button>
+                    <button className="btn ghost" onClick={() => { setPasteText(''); setPasteResult(null); }}>クリア</button>
+                  </div>
+                </>
+              )}
+              {pasteResult && (
+                <div className="pasteresult">
+                  <div className={pasteResult.ok ? 'ok' : ''}>{pasteResult.msg}</div>
+                  {pasteResult.ok && pasteResult.pastedCopies > 0 && <div className="hint">貼り付けた配布予定数の合計: {pasteResult.pastedCopies.toLocaleString()}部{pasteResult.overridden ? `（世帯数を貼り付けの値に置き換え: ${pasteResult.overridden}町丁目）` : ''}</div>}
+                  {pasteResult.pinMsg && <div className="hint">{pasteResult.pinMsg}</div>}
+                  {pasteResult.unmatched?.length > 0 && (
+                    <div className="warnbox">⚠ 照合できなかった行（{pasteResult.unmatched.length}）:
+                      <ul>{pasteResult.unmatched.slice(0, 15).map((u) => <li key={u.line}>{u.line}行目 {u.input}</li>)}</ul>
+                      地図で該当する町丁目をクリックして追加してください。
+                    </div>
+                  )}
+                  {pasteResult.notes?.map((n, i) => <div key={i} className="hint warn">{n}</div>)}
+                  {pasteResult.ok && <div className="hint">反映後も、地図の町丁目をクリック・円で追加／解除して調整できます。</div>}
+                </div>
+              )}
+            </Section>
+          )}
+          {mode !== 'town' && (
             <Section title="全国から自治体を選択">
               <Field label="都道府県">
                 <select value={pref} onChange={(e) => changePref(e.target.value)}>

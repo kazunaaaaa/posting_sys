@@ -25,6 +25,11 @@ function loadMunicipalities() {
   return muniCache;
 }
 
+// 全国の市区町村マスタ（世帯数の充填なし）
+export function allMunicipalities() {
+  return loadMunicipalities().municipalities;
+}
+
 export function listPrefectures() {
   const { municipalities } = loadMunicipalities();
   const seen = new Map();
