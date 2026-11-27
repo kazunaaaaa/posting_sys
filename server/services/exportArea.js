@@ -162,9 +162,10 @@ export async function buildAreaWorkbook(p) {
   }
 
   const reportSheet = p.report ? addReportSheet(wb, p.report, { title, totalCopies, rate }) : null;
+  const customerSheet = p.customerReport ? addCustomerReportSheet(wb, p.customerReport, { title, rate }) : null;
 
   const buffer = fixDrawingAnchors(Buffer.from(await wb.xlsx.writeBuffer()));
-  return { buffer, title, sheetName: ws.name, reportSheetName: reportSheet?.name || null, totalCopies, copies };
+  return { buffer, title, sheetName: ws.name, reportSheetName: reportSheet?.name || null, customerSheetName: customerSheet?.name || null, totalCopies, copies };
 }
 
 // ======================================================================
@@ -180,8 +181,8 @@ const INCOME_PREF_LABEL = { high: '高め', low: '低め' };
 
 const num = (v) => (Number.isFinite(+v) && v !== null && v !== '' ? +v : null);
 
-export function addReportSheet(wb, report = {}, ctx = {}) {
-  const ws = wb.addWorksheet(REPORT_SHEET_NAME, {
+function createReportSheet(wb, name) {
+  const ws = wb.addWorksheet(name, {
     pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
     views: [{ showGridLines: false }],
   });
@@ -249,21 +250,33 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
       r += 1;
     }
   };
+  const title = (text, sub) => {
+    ws.mergeCells(`B${r}:${lastCol}${r}`);
+    cell(`B${r}`, text, { font: { bold: true, size: 14 } });
+    ws.getRow(r).height = 26;
+    r += 1;
+    if (sub) {
+      ws.mergeCells(`B${r}:${lastCol}${r}`);
+      cell(`B${r}`, sub, { font: { color: { argb: 'FF7F7F7F' }, size: 10 } });
+      r += 1;
+    }
+  };
+  const finish = () => { ws.pageSetup.printArea = `A1:${lastCol}${r}`; return ws; };
+  return { ws, cell, heading, kv, para, table, title, finish };
+}
+
+const fmtDateTime = (d) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+export function addReportSheet(wb, report = {}, ctx = {}) {
+  const { heading, kv, para, table, title, finish } = createReportSheet(wb, REPORT_SHEET_NAME);
 
   const cond = report.conditions || {};
   const scoring = report.analysis?.scoring || null;
   const totals = scoring?.totals || {};
   const opt = report.optimize || null;
   const generated = report.generatedAt ? new Date(report.generatedAt) : new Date();
-  const fmtDate = (d) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-  ws.mergeCells(`B${r}:${lastCol}${r}`);
-  cell(`B${r}`, `AI分析レポート ${ctx.title ? `― ${ctx.title}` : ''}`, { font: { bold: true, size: 14 } });
-  ws.getRow(r).height = 26;
-  r += 1;
-  ws.mergeCells(`B${r}:${lastCol}${r}`);
-  cell(`B${r}`, `作成日時: ${fmtDate(generated)}`, { font: { color: { argb: 'FF7F7F7F' }, size: 10 } });
-  r += 1;
+  title(`AI分析レポート ${ctx.title ? `― ${ctx.title}` : ''}`, `作成日時: ${fmtDateTime(generated)}`);
 
   heading('■ 分析条件');
   kv('業態', cond.businessType || '指定なし');
@@ -380,8 +393,138 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
   ].filter(Boolean);
   para(notes.map((n) => `・${n}`).join('\n'), { color: 'FF595959' });
 
-  ws.pageSetup.printArea = `A1:${lastCol}${r}`;
-  return ws;
+  return finish();
+}
+
+// ======================================================================
+// 顧客分析レポート（顧客データ → 商圏・顧客の多い町丁目 → 絞り込んだ配布エリア）
+// 個人の情報は含めず、町丁目・距離帯・年齢層ごとの集計だけを載せる
+// cr: { generatedAt, summary, center, radius, distanceBands, ageBands, ageSuggest, cities, towns, area, overallPer1000 }
+// ======================================================================
+export const CUSTOMER_SHEET_NAME = '顧客分析レポート';
+
+export function addCustomerReportSheet(wb, cr = {}, ctx = {}) {
+  const { heading, kv, para, table, title, finish } = createReportSheet(wb, CUSTOMER_SHEET_NAME);
+  const sm = cr.summary || {};
+  const rad = cr.radius || {};
+  const area = cr.area || null;
+  const towns = (cr.towns || []).filter((t) => t.customers > 0);
+  const pct = (a, b) => (b ? a / b : null);
+  const name = (t) => `${t.city ? `${t.city} ` : ''}${townLabel(t.name)}`;
+  const fix1 = (v) => (Number.isFinite(+v) ? Math.round(+v * 10) / 10 : null);
+
+  title(`顧客分析レポート ${ctx.title ? `― ${ctx.title}` : ''}`, `作成日時: ${fmtDateTime(cr.generatedAt ? new Date(cr.generatedAt) : new Date())}`);
+
+  // ---- 結論 ----
+  heading('■ 結論：顧客分析から絞り込んだ配布エリア');
+  const lines = [];
+  if (rad['0.8']) lines.push(`商圏: 顧客の50%が📍から約${rad['0.5']}km、80%が約${rad['0.8']}km、90%が約${rad['0.9']}km以内に住んでいます。配布は約${rad['0.8']}km圏を中心に組むのが効率的です。`);
+  const top = [...towns].sort((a, b) => b.customers - a.customers).slice(0, 5);
+  if (top.length) lines.push(`顧客が多い町丁目: ${top.map((t) => `${townLabel(t.name)}（${fix1(t.customers)}人）`).join('、')}。`);
+  const dense = towns.filter((t) => t.customers >= 2 && t.per1000 != null).sort((a, b) => b.per1000 - a.per1000).slice(0, 3);
+  if (dense.length) lines.push(`世帯あたりで顧客が多い（浸透している）町丁目: ${dense.map((t) => `${townLabel(t.name)}（1000世帯あたり${t.per1000}人）`).join('、')}。似た地域性の周辺の町丁目も反応が見込めます。`);
+  if (cr.ageSuggest) lines.push(`顧客の年齢: 中央値${cr.ageSuggest.median}歳、80%が${cr.ageSuggest.min}〜${cr.ageSuggest.max}歳。ターゲットはこの年齢層が目安です。`);
+  if (area) {
+    const share = pct(area.customers, sm.matched);
+    const ratio = area.per1000 && cr.overallPer1000 ? area.per1000 / cr.overallPer1000 : null;
+    lines.push(`配布エリア${area.optimized ? '（🤖 顧客データを使ってAIが作成）' : ''}: ${area.townCount}町丁目・${(area.copies || 0).toLocaleString()}部。` +
+      `エリア内の顧客は約${fix1(area.customers)}人${share != null ? `（顧客全体の${Math.round(share * 100)}%）` : ''}、1000世帯あたり${area.per1000}人` +
+      `${ratio ? `（顧客のいる町丁目全体の${ratio.toFixed(1)}倍）` : ''}です。`);
+  }
+  const cands = (cr.candidates || []).slice(0, 5);
+  if (cands.length) lines.push(`追加候補（エリア外で顧客が多い）: ${cands.map((t) => `${townLabel(t.name)}（${fix1(t.customers)}人）`).join('、')}。部数に余裕があれば追加を検討してください。`);
+  para(lines.map((l) => `・${l}`).join('\n'));
+
+  // ---- 顧客データ ----
+  heading('■ 取り込んだ顧客データ');
+  kv('顧客数', sm.total != null ? `${sm.total.toLocaleString()}人${sm.excluded ? `（退会者 ${sm.excluded}人を除く）` : ''}` : null);
+  kv('町丁目に対応', sm.matched != null ? `${sm.matched.toLocaleString()}人（丁目まで ${sm.chome ?? '—'}人・町名まで ${sm.town ?? '—'}人）` : null);
+  kv('対応できなかった', sm.unmatched ? `${sm.unmatched}人（住所の誤り・町名の不一致など。集計には含めていません）` : null);
+  kv('店舗', sm.store || null);
+  kv('中心地（📍）', cr.center || null);
+
+  // ---- 距離 ----
+  if (cr.distanceBands?.length) {
+    heading('■ 📍からの距離別の顧客');
+    const tot = cr.distanceBands.reduce((a, b) => a + b.count, 0);
+    let cum = 0;
+    table([
+      { header: '距離', key: 'label', span: 2 },
+      { header: '顧客(人)', value: (x) => fix1(x.count), numFmt: '#,##0.#' },
+      { header: '割合', value: (x) => pct(x.count, tot), numFmt: '0.0%' },
+      { header: '累計', value: (x) => { cum += x.count; return pct(cum, tot); }, numFmt: '0.0%' },
+    ], cr.distanceBands);
+  }
+
+  // ---- 年齢 ----
+  if (cr.ageBands?.some((b) => b.count > 0)) {
+    heading('■ 顧客の年齢層');
+    const tot = cr.ageBands.reduce((a, b) => a + b.count, 0);
+    table([
+      { header: '年齢層', key: 'label', span: 2 },
+      { header: '人数', key: 'count', numFmt: '#,##0' },
+      { header: '割合', value: (x) => pct(x.count, tot), numFmt: '0.0%' },
+    ], cr.ageBands);
+  }
+
+  // ---- 市区町村 ----
+  if (cr.cities?.length) {
+    heading('■ 市区町村別の顧客');
+    const tot = cr.cities.reduce((a, b) => a + b.count, 0);
+    table([
+      { header: '市区町村', key: 'name', span: 2 },
+      { header: '顧客(人)', value: (x) => fix1(x.count), numFmt: '#,##0.#' },
+      { header: '割合', value: (x) => pct(x.count, tot), numFmt: '0.0%' },
+    ], cr.cities);
+  }
+
+  // ---- 町丁目 ----
+  if (towns.length) {
+    heading('■ 顧客が多い町丁目（上位20）');
+    table([
+      { header: '順位', value: (x) => x.rank, align: 'center' },
+      { header: '町丁目', value: name, span: 2 },
+      { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+      { header: '世帯数', key: 'households', numFmt: '#,##0' },
+      { header: '1000世帯あたり', key: 'per1000', numFmt: '0.0' },
+      { header: '📍から(km)', key: 'distanceKm', numFmt: '0.0' },
+      { header: '配布エリア', value: (x) => (x.selected ? '○' : ''), align: 'center' },
+    ], [...towns].filter((t) => t.customers >= 0.5).sort((a, b) => b.customers - a.customers).slice(0, 20).map((t, i) => ({ ...t, rank: i + 1 })));
+  }
+
+  // ---- 絞り込んだ配布エリア ----
+  if (area?.towns?.length) {
+    heading(`■ 絞り込んだ配布エリア（${area.townCount}町丁目・${(area.copies || 0).toLocaleString()}部）`);
+    table([
+      { header: '町丁目', value: name, span: 2 },
+      { header: '世帯数', key: 'households', numFmt: '#,##0' },
+      { header: '配布部数', key: 'copies', numFmt: '#,##0' },
+      { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+      { header: '1000世帯あたり', key: 'per1000', numFmt: '0.0' },
+    ], [...area.towns].sort((a, b) => (b.customers || 0) - (a.customers || 0)));
+  }
+
+  // ---- 追加候補 ----
+  if (cr.candidates?.length) {
+    heading('■ 追加候補（配布エリア外で顧客が多い町丁目）');
+    table([
+      { header: '町丁目', value: name, span: 2 },
+      { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+      { header: '世帯数', key: 'households', numFmt: '#,##0' },
+      { header: '1000世帯あたり', key: 'per1000', numFmt: '0.0' },
+      { header: '📍から(km)', key: 'distanceKm', numFmt: '0.0' },
+    ], cr.candidates.slice(0, 10));
+  }
+
+  heading('■ 分析方法・注意');
+  para([
+    '・顧客の住所を町丁目に照合して集計しています（外部の地図サービスは使っていません）。丁目が書かれていない住所は、その町の丁目に均等に割り振っています（小数になることがあります）。',
+    '・距離は📍から町丁目の中心までの直線距離で近似しています。',
+    '・世帯数は国勢調査（または貼り付けた世帯数）。1000世帯あたりの顧客数は、顧客の多さを町の大きさで割った「浸透度」の目安です。',
+    '・このシートには氏名・住所・年齢などの個人の情報は含めず、町丁目・距離・年齢層ごとの集計だけを載せています。',
+  ].join('\n'), { color: 'FF595959' });
+
+  return finish();
 }
 
 // exceljs は <xdr:oneCellAnchor> に editAs 属性を付けるが、これは twoCellAnchor 専用で

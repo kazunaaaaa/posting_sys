@@ -135,3 +135,67 @@ export function suggestProfile(customers) {
   const sex = g.length >= 5 ? (f / g.length >= 0.8 ? 'female' : f / g.length <= 0.2 ? 'male' : 'all') : null;
   return { ageMin: min, ageMax: max, median: q(0.5), count: ages.length, sex, genderKnown: g.length };
 }
+
+const DIST_BANDS = [[0, 0.5, '0.5km未満'], [0.5, 1, '0.5〜1km'], [1, 1.5, '1〜1.5km'], [1.5, 2, '1.5〜2km'], [2, 3, '2〜3km'], [3, 5, '3〜5km'], [5, Infinity, '5km以上']];
+const AGE_BANDS = [[0, 19, '19歳以下'], [20, 29, '20代'], [30, 39, '30代'], [40, 49, '40代'], [50, 59, '50代'], [60, 69, '60代'], [70, 200, '70歳以上']];
+
+/**
+ * Excel「顧客分析レポート」シート用の集計（個人の情報は含めない）
+ */
+export function customerReportData({ cust, custList, custAgg, custOpts, custRadius, custProfile, pin, centerLabel, selectedAreas, optResult }) {
+  if (!custAgg) return null;
+  const sel = new Set(selectedAreas.map((a) => a.code));
+  const per1000 = (c, h) => (h ? +((c / h) * 1000).toFixed(1) : null);
+  const towns = custAgg.markers.map((m) => ({
+    name: m.name, city: m.city, customers: m.count, households: m.households ?? null,
+    per1000: per1000(m.count, m.households), distanceKm: pin ? +distKm(pin, m).toFixed(1) : null, selected: sel.has(m.code),
+  }));
+  const hhAll = custAgg.markers.reduce((s, m) => s + (m.households || 0), 0);
+  const cntAll = custAgg.markers.reduce((s, m) => s + m.count, 0);
+
+  const distanceBands = pin ? DIST_BANDS.map(([a, b, label]) => ({
+    label, count: +custAgg.markers.filter((m) => { const d = distKm(pin, m); return d >= a && d < b; }).reduce((s, m) => s + m.count, 0).toFixed(1),
+  })).filter((b, i, arr) => b.count > 0 || arr.slice(i + 1).some((x) => x.count > 0)) : [];
+
+  const ages = custList.map((c) => c.age).filter((a) => Number.isFinite(a));
+  const ageBands = ages.length ? AGE_BANDS.map(([a, b, label]) => ({ label, count: ages.filter((x) => x >= a && x <= b).length })) : [];
+
+  const byCity = new Map();
+  for (const m of custAgg.markers) byCity.set(m.city, (byCity.get(m.city) || 0) + m.count);
+  const cities = [...byCity].map(([name, count]) => ({ name, count: +count.toFixed(1) })).sort((a, b) => b.count - a.count);
+
+  let area = null;
+  if (selectedAreas.length) {
+    const list = selectedAreas.map((a) => {
+      const c = custAgg.byCode[a.code] || 0;
+      return { name: a.name, city: a.city, households: a.households, copies: a.distribution, customers: +c.toFixed(1), per1000: per1000(c, a.households) };
+    });
+    const hh = list.reduce((s, t) => s + (t.households || 0), 0);
+    const cc = list.reduce((s, t) => s + t.customers, 0);
+    const same = optResult?.codes && optResult.codes.length === sel.size && optResult.codes.every((c) => sel.has(c));
+    area = {
+      towns: list, townCount: list.length, households: hh, copies: list.reduce((s, t) => s + (t.copies || 0), 0),
+      customers: +cc.toFixed(1), per1000: per1000(cc, hh), optimized: !!(same && optResult.customersInArea != null),
+    };
+  }
+  const maxD = custRadius?.[0.9];
+  const candidates = towns
+    .filter((t) => !t.selected && t.customers >= 1 && (maxD == null || t.distanceKm == null || t.distanceKm <= maxD))
+    .sort((a, b) => b.customers - a.customers || (b.per1000 || 0) - (a.per1000 || 0))
+    .slice(0, 10);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      total: custList.length, matched: custAgg.matched, chome: custAgg.chome, town: custAgg.town, unmatched: custAgg.unmatched.length,
+      excluded: custOpts.excludeWithdrawn ? cust.list.filter((c) => c.withdrawn).length : 0,
+      store: custOpts.store || (cust.stores.length === 1 ? cust.stores[0] : cust.stores.length ? 'すべての店舗' : null),
+    },
+    center: centerLabel || null,
+    radius: custRadius ? { '0.5': custRadius[0.5], '0.8': custRadius[0.8], '0.9': custRadius[0.9] } : null,
+    distanceBands, ageBands,
+    ageSuggest: custProfile ? { min: custProfile.ageMin, max: custProfile.ageMax, median: custProfile.median } : null,
+    cities, towns, area, candidates,
+    overallPer1000: per1000(cntAll, hhAll),
+  };
+}

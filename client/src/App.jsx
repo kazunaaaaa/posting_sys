@@ -6,7 +6,7 @@ import { buildMapImage } from './lib/mapImage.js';
 import { townLabel } from './lib/labels.js';
 import { COLORS } from './lib/colors.js';
 import { DEFAULT_RATE, withRate, rateFromPercent } from './lib/distribution.js';
-import { decodeText, parseCsv, detectColumns, extractCustomers, aggregate, radiusPercentiles, suggestProfile } from './lib/customers.js';
+import { decodeText, parseCsv, detectColumns, extractCustomers, aggregate, radiusPercentiles, suggestProfile, customerReportData } from './lib/customers.js';
 
 // 「📍から約 N 部を追加」の選択肢
 const COUNT_OPTIONS = [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000, 50000, 100000];
@@ -84,7 +84,7 @@ export default function App() {
 
   // 顧客データ（CSV）。ブラウザのメモリ内だけに保持（保存しない）
   const [cust, setCust] = useState(null); // { fileName, list, cols, match, stores }
-  const [custOpts, setCustOpts] = useState({ excludeWithdrawn: true, store: '', show: true, use: true, inExcel: false });
+  const [custOpts, setCustOpts] = useState({ excludeWithdrawn: true, store: '', show: true, use: true, inExcel: false, reportSheet: true });
   const [custMsg, setCustMsg] = useState('');
 
   // 非同期処理の途中でも最新の町丁目を参照するための参照
@@ -636,8 +636,15 @@ export default function App() {
       }
 
       setExportMsg('Excelを作成中…');
+      // 顧客分析レポート（別シート）: 顧客データを読み込んでいるとき（町丁目・距離・年齢層ごとの集計だけ）
+      const customerReport = isTown && custOpts.reportSheet && custAgg?.markers.length ? customerReportData({
+        cust, custList, custAgg, custOpts, custRadius, custProfile, pin, selectedAreas, optResult,
+        centerLabel: pin ? `${storeName ? storeName + '　' : ''}緯度 ${pin.lat.toFixed(5)} / 経度 ${pin.lng.toFixed(5)}` : storeName,
+      }) : null;
+
       const { blob, filename } = await api.exportAreaXlsx({
         report,
+        customerReport,
         target,
         rows,
         coverRate: rate,
@@ -652,7 +659,7 @@ export default function App() {
       a.href = url; a.download = filename;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setExportMsg(`✅ ${filename} をダウンロードしました${report ? '（シート「AI分析レポート」付き）' : ''}`
+      setExportMsg(`✅ ${filename} をダウンロードしました${[report && '「AI分析レポート」', customerReport && '「顧客分析レポート」'].filter(Boolean).length ? `（シート${[report && '「AI分析レポート」', customerReport && '「顧客分析レポート」'].filter(Boolean).join('・')}付き）` : ''}`
         + (!map ? '\n※ 地図画像を作成できませんでした' : !map.baseMap ? `\n※ 背景の地図を取得できなかったため、背景なしの地図を貼り付けました。\n原因: ${map.baseError || '不明'}` : ''));
     } catch (e) {
       setExportMsg(`出力に失敗しました: ${e.message}`);
@@ -1116,6 +1123,9 @@ export default function App() {
               <input type="number" step="1000" value={titleCopies} placeholder={`自動: ${autoTitleCopies.toLocaleString()}部`}
                 onChange={(e) => setTitleCopies(e.target.value)} />
             </Field>
+            {custAgg?.markers.length > 0 && (
+              <label className="checkline"><input type="checkbox" checked={custOpts.reportSheet} onChange={(e) => setCustOpts((o) => ({ ...o, reportSheet: e.target.checked }))} />顧客分析レポート（別シート）を付ける</label>
+            )}
             {custAgg?.markers.length > 0 && (
               <label className="checkline"><input type="checkbox" checked={custOpts.inExcel} onChange={(e) => setCustOpts((o) => ({ ...o, inExcel: e.target.checked }))} />地図に顧客の分布（町丁目ごとの人数）を入れる</label>
             )}

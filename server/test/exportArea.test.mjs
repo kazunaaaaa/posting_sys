@@ -92,5 +92,33 @@ const wbZ = new ExcelJS.Workbook(); await wbZ.xlsx.load(zeroT.buffer);
 eq('ターゲット0人なら行を足さない', wbZ.worksheets[0].getCell('B3').value, '市区町村名');
 eq('地図なしでも出力', noMap.buffer.length > 1000, true);
 
+// 顧客分析レポート（別シート）
+const cr = {
+  summary: { total: 60, matched: 55, chome: 50, town: 5, unmatched: 5, excluded: 2, store: 'テスト店' },
+  center: '緯度 35.5 / 経度 139.4',
+  radius: { '0.5': 0.6, '0.8': 1.2, '0.9': 1.8 },
+  distanceBands: [{ label: '0.5km未満', count: 20 }, { label: '0.5〜1km', count: 25 }, { label: '1km以上', count: 10 }],
+  ageBands: [{ label: '20代', count: 10 }, { label: '30代', count: 30 }, { label: '40代', count: 15 }],
+  ageSuggest: { min: 25, max: 49, median: 36 },
+  cities: [{ name: '大和市', count: 40 }, { name: '座間市', count: 15 }],
+  towns: [
+    { name: '南林間一丁目', city: '大和市', customers: 12, households: 1500, per1000: 8, distanceKm: 0.3, selected: true },
+    { name: '相模が丘六丁目', city: '座間市', customers: 6, households: 1200, per1000: 5, distanceKm: 1.4, selected: false },
+  ],
+  area: { townCount: 1, copies: 1050, households: 1500, customers: 12, per1000: 8, optimized: true,
+    towns: [{ name: '南林間一丁目', city: '大和市', households: 1500, copies: 1050, customers: 12, per1000: 8 }] },
+  candidates: [{ name: '相模が丘六丁目', city: '座間市', customers: 6, households: 1200, per1000: 5, distanceKm: 1.4 }],
+  overallPer1000: 4,
+};
+const withC = await buildAreaWorkbook({ rows, customerReport: cr });
+eq('顧客分析レポートのシート名', withC.customerSheetName, '顧客分析レポート');
+const zc = new AdmZip(withC.buffer);
+eq('シートの順番（エリア表 → 顧客分析）', [...zc.readAsText('xl/workbook.xml').matchAll(/<sheet [^>]*name="([^"]+)"/g)].map((m) => m[1]), [withC.sheetName, '顧客分析レポート']);
+const ssc = zc.readAsText('xl/sharedStrings.xml');
+for (const t of ['■ 結論：顧客分析から絞り込んだ配布エリア', '80%が約1.2km', '顧客全体の22%', '2.0倍', '追加候補（エリア外で顧客が多い）: 相模が丘(6)', '■ 📍からの距離別の顧客', '■ 顧客の年齢層', '■ 絞り込んだ配布エリア（1町丁目・1,050部）', '退会者 2人を除く', '個人の情報は含めず']) {
+  eq(`顧客分析に「${t}」`, ssc.includes(t), true);
+}
+eq('customerReport なしなら付けない', (await buildAreaWorkbook({ rows })).customerSheetName, null);
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAIL'}  (${pass} passed, ${fail} failed)`);
 process.exit(fail === 0 ? 0 : 1);
