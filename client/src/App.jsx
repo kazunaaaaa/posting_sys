@@ -6,6 +6,7 @@ import { buildMapImage } from './lib/mapImage.js';
 import { townLabel } from './lib/labels.js';
 import { COLORS } from './lib/colors.js';
 import { DEFAULT_RATE, withRate, rateFromPercent } from './lib/distribution.js';
+import { decodeText, parseCsv, detectColumns, extractCustomers, aggregate, radiusPercentiles, suggestProfile } from './lib/customers.js';
 
 // 「📍から約 N 部を追加」の選択肢
 const COUNT_OPTIONS = [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000, 50000, 100000];
@@ -80,6 +81,11 @@ export default function App() {
   const [pasteReplace, setPasteReplace] = useState(true);   // 今の選択を置き換える
   const [pasteUseHh, setPasteUseHh] = useState(true);       // 貼り付けた世帯数を使う
   const [pasteResult, setPasteResult] = useState(null);
+
+  // 顧客データ（CSV）。ブラウザのメモリ内だけに保持（保存しない）
+  const [cust, setCust] = useState(null); // { fileName, list, cols, match, stores }
+  const [custOpts, setCustOpts] = useState({ excludeWithdrawn: true, store: '', show: true, use: true, inExcel: false });
+  const [custMsg, setCustMsg] = useState('');
 
   // 非同期処理の途中でも最新の町丁目を参照するための参照
   const townAreasRef = useRef(townAreas);
@@ -201,6 +207,13 @@ export default function App() {
     return Object.fromEntries(analysis.scoring.areas.map((a) => [a.code, a.score]));
   }, [analysis]);
   const bestCode = analysis?.scoring?.best?.code;
+  // 顧客の集計（退会者・店舗の絞り込み後）
+  const custList = useMemo(() => (cust ? cust.list.filter((c) => !(custOpts.excludeWithdrawn && c.withdrawn) && (!custOpts.store || c.store === custOpts.store)) : []),
+    [cust, custOpts.excludeWithdrawn, custOpts.store]);
+  const custAgg = useMemo(() => (cust?.match ? aggregate(custList, cust.match) : null), [custList, cust]);
+  const custRadius = useMemo(() => (custAgg && pin ? radiusPercentiles(custAgg.markers, pin) : null), [custAgg, pin]);
+  const custProfile = useMemo(() => suggestProfile(custList), [custList]);
+  const custMarkers = custOpts.show && custAgg ? custAgg.markers : [];
   const hasIncomeCol = !!analysis?.scoring?.areas?.some((a) => a.incomeLevel && a.incomeLevel !== '—');
   const businessIcon = businessTypes.find((b) => b.id === businessTypeId)?.icon;
 
@@ -348,6 +361,54 @@ export default function App() {
     } catch { setAddrMsg('住所が見つかりませんでした'); }
   }
 
+  // ---- 👥 顧客データ（CSV）----
+  function customersPayload() {
+    return custOpts.use && custAgg?.markers.length ? custAgg.byCode : null;
+  }
+
+  async function loadCustomerFile(file) {
+    if (!file) return;
+    setCustMsg('読み込み中…');
+    try {
+      const rows = parseCsv(decodeText(await file.arrayBuffer()));
+      const cols = detectColumns(rows[0] || []);
+      if (!cols.ok) throw new Error('住所の列が見つかりません（1行目の見出しに「住所」「都道府県」「市区町村」などが必要です）');
+      const list = extractCustomers(rows, cols);
+      if (!list.length) throw new Error('住所の入った行がありません');
+      setCustMsg(`${list.length.toLocaleString()}件の住所を町丁目に照合中…（初回は町丁目データの取得に少しかかります）`);
+      // サーバー（このMacの中）へは行番号・都道府県・住所だけを送る
+      const match = await api.matchCustomers(list.map((c) => ({ i: c.i, pref: c.pref, address: c.address })));
+      const stores = [...new Set(list.map((c) => c.store).filter(Boolean))];
+      setCust({ fileName: file.name, list, cols, match, stores });
+      setCustOpts((o) => ({ ...o, store: '' }));
+      setAnalysis(null);
+      // 顧客の多い市区町村の町丁目を地図に読み込む
+      const main = match.cities.filter((c) => c.count >= Math.max(2, list.length * 0.05));
+      for (const c of main) {
+        setCustMsg(`${c.name}の町丁目を読み込み中…`);
+        try { await loadTownCity(c.code, c.name, { quiet: true }); } catch { /* 地図にはバブルだけ表示 */ }
+      }
+      setCustMsg(match.errors?.length ? `⚠ ${match.errors.slice(0, 2).join(' / ')}` : '');
+    } catch (e) {
+      setCustMsg(`読み込めませんでした: ${e.message}`);
+    }
+  }
+
+  function clearCustomers() {
+    setCust(null); setCustMsg(''); setAnalysis(null);
+  }
+
+  function applyCustomerProfile() {
+    if (!custProfile) return;
+    setProfile((p) => ({ ...p, ageMin: String(custProfile.ageMin), ageMax: String(custProfile.ageMax), ...(custProfile.sex ? { sex: custProfile.sex } : {}) }));
+    setAnalysis(null);
+  }
+
+  function addCustomerRadiusCircle(p = 0.8) {
+    if (!pin || !custRadius?.[p]) return;
+    setCircles((prev) => [...prev, { id: uid('circle'), lat: pin.lat, lng: pin.lng, radiusKm: custRadius[p], codes: [], drawOnly: true, tag: `顧客${Math.round(p * 100)}%` }]);
+  }
+
   // ---- 📋 エリア表の貼り付け → 地図に反映（その後クリック・円で調整できる）----
   async function importAreaTable() {
     if (!pasteText.trim() || mode !== 'town') return;
@@ -451,6 +512,7 @@ export default function App() {
       const r = await api.optimizeArea({
         pin: p, targetCopies: target, cityCodes: townCitiesRef.current.map((c) => c.code),
         businessTypeId: businessTypeId || null, profile: profilePayload(), incomePref: incomePref || null, coverRate: rate,
+        customers: customersPayload(),
       });
       if (!r.codes?.length) { setCountMsg('最適エリアを作成できませんでした（候補の町丁目がありません）'); return; }
       setSelected(r.codes);
@@ -567,6 +629,7 @@ export default function App() {
         map = await buildMapImage({
           areas, circles, pin, pinLabel: storeName, labelOf: isTown ? townLabel : (n) => n,
           competitors: comps, competitorLabel: bt ? `競合：${bt.label}` : '競合',
+          customers: custOpts.inExcel && custAgg ? custAgg.markers : [],
         });
       } catch (e) {
         console.warn('map image failed', e);
@@ -617,7 +680,8 @@ export default function App() {
         const r = await api.searchCompetitors(businessTypeId, codes, mode);
         comps = r.competitors; setCompetitors(comps); setCompetitorSource(r.source);
       }
-      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload(), incomePref, rate);
+      const res = await api.analyze(codes, mode, businessTypeId || null, comps, unitCost, profilePayload(), incomePref, rate,
+        mode === 'town' && customersPayload() ? { customers: customersPayload(), customerTotal: custAgg.matched } : {});
       const withCodes = { ...res, codes: [...codes], incomePref, competitors: comps };
       setAnalysis(withCodes);
       return withCodes;
@@ -757,6 +821,63 @@ export default function App() {
               )}
             </Section>
           )}
+          {mode === 'town' && (
+            <Section title="👥 顧客データ（CSV）">
+              <label className="btn ghost filebtn">
+                {cust ? '別のCSVを読み込む' : '顧客CSVを読み込む'}
+                <input type="file" accept=".csv,.tsv,.txt" hidden onChange={(e) => { loadCustomerFile(e.target.files?.[0]); e.target.value = ''; }} />
+              </label>
+              <div className="hint">ファイルはこのMacの中だけで処理し、保存しません（画面を閉じると消えます）。照合に使うのは住所だけです。地図には町丁目ごとの人数だけを表示します。</div>
+              {custMsg && <div className="hint">{custMsg}</div>}
+              {cust && custAgg && (
+                <div className="custpanel">
+                  <div className="custsum"><b>{custAgg.matched.toLocaleString()}</b> / {custAgg.total.toLocaleString()}人を町丁目に対応
+                    <span>（丁目まで {custAgg.chome}・町名まで {custAgg.town}）</span></div>
+                  {custAgg.unmatched.length > 0 && (
+                    <details className="warnbox">
+                      <summary>対応できなかった {custAgg.unmatched.length}人</summary>
+                      <ul>{custAgg.unmatched.slice(0, 30).map((u) => <li key={u.i}>{u.i}行目 {u.text}（{u.reason}）</li>)}</ul>
+                    </details>
+                  )}
+                  {cust.cols.withdrawn >= 0 && (
+                    <label className="checkline"><input type="checkbox" checked={custOpts.excludeWithdrawn} onChange={(e) => setCustOpts((o) => ({ ...o, excludeWithdrawn: e.target.checked }))} />退会者を除く</label>
+                  )}
+                  {cust.stores.length > 1 && (
+                    <Field label="店舗">
+                      <select value={custOpts.store} onChange={(e) => setCustOpts((o) => ({ ...o, store: e.target.value }))}>
+                        <option value="">すべての店舗</option>
+                        {cust.stores.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                  <label className="checkline"><input type="checkbox" checked={custOpts.show} onChange={(e) => setCustOpts((o) => ({ ...o, show: e.target.checked }))} />地図に表示</label>
+                  <label className="checkline"><input type="checkbox" checked={custOpts.use} onChange={(e) => { setCustOpts((o) => ({ ...o, use: e.target.checked })); setAnalysis(null); }} />AI分析・AI最適エリア作成に使う</label>
+
+                  {custRadius ? (
+                    <div className="custrow">📍からの距離: 顧客の50%が <b>{custRadius[0.5]}km</b>・80%が <b>{custRadius[0.8]}km</b>・90%が <b>{custRadius[0.9]}km</b> 以内
+                      <button className="chip redline" onClick={() => addCustomerRadiusCircle(0.8)}>80%の半径で円</button></div>
+                  ) : <div className="hint">📍を立てると、顧客が何km以内に集まっているか（商圏）を計算します。</div>}
+                  {custProfile && (
+                    <div className="custrow">顧客の年齢: 中央値 <b>{custProfile.median}歳</b>・80%が <b>{custProfile.ageMin}〜{custProfile.ageMax}歳</b>
+                      {custProfile.sex && custProfile.sex !== 'all' ? `・${custProfile.sex === 'female' ? '女性' : '男性'}が8割以上` : ''}
+                      <button className="chip" onClick={applyCustomerProfile}>ターゲットに設定</button></div>
+                  )}
+                  {custAgg.markers.length > 0 && (
+                    <table className="ranktable">
+                      <thead><tr><th>顧客が多い町丁目</th><th>人</th><th>1000世帯あたり</th></tr></thead>
+                      <tbody>
+                        {custAgg.markers.slice(0, 8).map((m) => (
+                          <tr key={m.code}><td>{townLabel(m.name)}</td><td>{m.count}</td><td>{m.households ? ((m.count / m.households) * 1000).toFixed(1) : '—'}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <div className="hint">「🤖 AIで最適エリアを作成」「AIで最適エリアを分析」は、顧客が多い町丁目（世帯あたり）とその周辺を優先します。</div>
+                  <button className="btn ghost" onClick={clearCustomers}>顧客データを消す</button>
+                </div>
+              )}
+            </Section>
+          )}
           {mode !== 'town' && (
             <Section title="全国から自治体を選択">
               <Field label="都道府県">
@@ -864,6 +985,7 @@ export default function App() {
             <LegendDot color={COLORS.selFill} label="選択エリア" />
             <LegendDot color={COLORS.circle} label="円" />
             <LegendDot color="#7c3aed" label="競合" />
+            {custMarkers.length > 0 && <LegendDot color="#0d9488" label="顧客" />}
             {barriers.length > 0 && <><LegendLine color="#2563eb" label="川" /><LegendLine color="#475569" label="道路" /><LegendLine color="#111827" label="線路" dashed /></>}
             {analysis && <LegendGradient />}
           </div>
@@ -910,6 +1032,7 @@ export default function App() {
               polygons={mapPolygons}
               points={mapPoints}
               competitors={competitors}
+              customers={custMarkers}
               circles={circles}
               pin={pin}
               pinLabel={storeName}
@@ -934,6 +1057,9 @@ export default function App() {
                 {optResult.targetTotal > 0 && (
                   <div>🎯 {optResult.profile?.label}: 約<b>{optResult.targetTotal.toLocaleString()}</b>人
                     <span>{optResult.targetSource === 'census' ? '（国勢調査）' : optResult.targetSource === 'mixed' ? '（一部推計）' : '（全国の年齢構成による推計）'}</span></div>
+                )}
+                {optResult.customersInArea != null && (
+                  <div>👥 エリア内の顧客 約<b>{Math.round(optResult.customersInArea).toLocaleString()}</b>人<span>（顧客の多い町丁目と周辺を優先）</span></div>
                 )}
                 {optResult.incomeIndex != null && (
                   <div>💴 所得指数 <b>{optResult.incomeIndex.toFixed(2)}</b><span>（推計・市区町村平均=1.00、{optResult.incomePref === 'low' ? '低め' : '高め'}を優先）</span></div>
@@ -990,6 +1116,9 @@ export default function App() {
               <input type="number" step="1000" value={titleCopies} placeholder={`自動: ${autoTitleCopies.toLocaleString()}部`}
                 onChange={(e) => setTitleCopies(e.target.value)} />
             </Field>
+            {custAgg?.markers.length > 0 && (
+              <label className="checkline"><input type="checkbox" checked={custOpts.inExcel} onChange={(e) => setCustOpts((o) => ({ ...o, inExcel: e.target.checked }))} />地図に顧客の分布（町丁目ごとの人数）を入れる</label>
+            )}
             <button className="btn primary" disabled={!selectedAreas.length || loading.export} onClick={downloadAreaTable}>
               {loading.export ? '作成中…' : '配布部数表ダウンロード（Excel）'}
             </button>
@@ -1045,6 +1174,19 @@ export default function App() {
                   )}
                   {analysis.scoring.income?.errors?.length > 0 && !analysis.scoring.income?.municipal?.length && !analysis.scoring.incomeRanking?.length && (
                     <div className="hint warn">所得データを取得できませんでした（{analysis.scoring.income.errors[0]}）</div>
+                  )}
+                  {analysis.scoring.customerRanking?.length > 0 && (
+                    <>
+                      <h4 className="subhead">👥 顧客が多いエリア<span>選択エリア内 約{Math.round(analysis.scoring.totals.customers || 0).toLocaleString()}人</span></h4>
+                      <table className="ranktable">
+                        <thead><tr><th>順</th><th>エリア</th><th>顧客</th><th>1000世帯あたり</th></tr></thead>
+                        <tbody>
+                          {analysis.scoring.customerRanking.slice(0, 8).map((a, i) => (
+                            <tr key={a.code} className={i === 0 ? 'top' : ''}><td>{i + 1}</td><td>{townLabel(a.name)}</td><td>{a.customers}</td><td>{a.customerPer1000}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
                   )}
                   <h4 className="subhead">総合スコア</h4>
                   <table className="ranktable">

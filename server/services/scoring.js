@@ -91,7 +91,18 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
   const nIncome = hasIncome
     ? normalize(areas.map((a) => { const ix = income[a.code]?.index || 1; return incomePref === 'high' ? ix : 2 - ix; }))
     : null;
-  const W = weightsFor(hasTarget, hasIncome);
+  // 顧客実績（options.customers = { code: 顧客数 }）: 世帯あたりの顧客数（少数は全体平均に寄せて安定化）
+  const customers = options.customers || null;
+  const hasCustomer = !!customers && areas.some((a) => customers[a.code] > 0);
+  let nCustomer = null;
+  if (hasCustomer) {
+    const cTot = areas.reduce((s, a) => s + (customers[a.code] || 0), 0);
+    const hTot = areas.reduce((s, a) => s + a.households, 0) || 1;
+    const avg = cTot / hTot, prior = 300;
+    nCustomer = normalize(areas.map((a) => ((customers[a.code] || 0) + avg * prior) / (a.households + prior)));
+  }
+  let W = weightsFor(hasTarget, hasIncome);
+  if (hasCustomer) W = { ...Object.fromEntries(Object.entries(W).map(([k, v]) => [k, +(v * 0.75).toFixed(4)])), customer: 0.25 };
 
   const scored = areas.map((a, i) => {
     const rate = rateMap[a.code] ?? unitCost;
@@ -102,6 +113,7 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
       cost: Math.round(nCost[i] * 100),
       ...(hasTarget ? { target: Math.round(nTarget[i] * 100) } : {}),
       ...(hasIncome ? { income: Math.round(nIncome[i] * 100) } : {}),
+      ...(hasCustomer ? { customer: Math.round(nCustomer[i] * 100) } : {}),
     };
     const score =
       nReach[i] * W.reach +
@@ -109,7 +121,8 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
       nEff[i] * W.efficiency +
       nCost[i] * W.cost +
       (hasTarget ? nTarget[i] * W.target : 0) +
-      (hasIncome ? nIncome[i] * W.income : 0);
+      (hasIncome ? nIncome[i] * W.income : 0) +
+      (hasCustomer ? nCustomer[i] * W.customer : 0);
     const tg = targets?.[a.code];
     const inc = income?.[a.code];
     return {
@@ -132,6 +145,7 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
         targetEstimated: !!tg.estimated,
       } : {}),
       ...(inc ? { incomeIndex: inc.index, incomeLevel: inc.level, incomeEstimated: !!inc.estimated } : {}),
+      ...(customers ? { customers: +(customers[a.code] || 0).toFixed(1), customerPer1000: +(((customers[a.code] || 0) / a.households) * 1000).toFixed(2) } : {}),
     };
   });
 
@@ -139,6 +153,10 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
   const targetRanking = hasTarget
     ? [...scored].sort((x, y) => (y.target || 0) - (x.target || 0)).slice(0, 10)
         .map((a) => ({ code: a.code, name: a.name, target: a.target, targetRate: a.targetRate, targetPerCopy: a.targetPerCopy }))
+    : [];
+  const customerRanking = hasCustomer
+    ? [...scored].filter((a) => a.customers > 0).sort((x, y) => y.customers - x.customers || y.customerPer1000 - x.customerPer1000).slice(0, 10)
+        .map((a) => ({ code: a.code, name: a.name, customers: a.customers, customerPer1000: a.customerPer1000 }))
     : [];
   const incomeRanking = income && scored.some((a) => a.incomeIndex > 0)
     ? [...scored].filter((a) => a.incomeIndex > 0).sort((x, y) => incomePref === 'low' ? x.incomeIndex - y.incomeIndex : y.incomeIndex - x.incomeIndex).slice(0, 10)
@@ -151,6 +169,7 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
     targetRanking,
     incomePref,
     incomeRanking,
+    customerRanking,
     unitCost,
     areas: scored,
     best: scored[0] ?? null,
@@ -165,6 +184,7 @@ export function scoreAreas(allAreas, competitors = [], options = {}) {
         // 人口（ターゲット占有率の分母）
         targetPopulation: areas.reduce((s, a) => s + (targets[a.code]?.population || 0), 0),
       } : {}),
+      ...(customers ? { customers: +scored.reduce((s, a) => s + (a.customers || 0), 0).toFixed(1) } : {}),
     },
   };
 }

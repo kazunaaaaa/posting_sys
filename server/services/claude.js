@@ -30,6 +30,15 @@ function ruleBasedExplanation(scoring, businessTypeLabel) {
         `。選択エリア全体で約${(totals.target || 0).toLocaleString()}人に届く見込みです。`
     );
   }
+  if (scoring.customerRanking?.length) {
+    const inArea = scoring.totals?.customers || 0;
+    const share = scoring.customerTotal ? `（取り込んだ顧客${scoring.customerTotal.toLocaleString()}人の${Math.round((inArea / scoring.customerTotal) * 100)}%）` : '';
+    lines.push(
+      `【顧客】選択エリア内の顧客は約${Math.round(inArea).toLocaleString()}人${share}。顧客が多いエリア: ` +
+        scoring.customerRanking.slice(0, 3).map((a) => `${a.name} ${a.customers}人（1000世帯あたり${a.customerPer1000}人）`).join(' / ') +
+        '。顧客が多い町丁目と、その周辺の似た町丁目を優先して評価しました。'
+    );
+  }
   if (scoring.income?.municipal?.length || scoring.incomeRanking?.length) {
     const mu = (scoring.income?.municipal || []).map((m) => `${m.city} 約${Math.round(m.avgIncomeYen / 10000)}万円（${m.year}年）`).join('・');
     const pref = scoring.incomePref === 'high' ? '所得が高めの地域を優先して評価しました。' : scoring.incomePref === 'low' ? '所得が低めの地域を優先して評価しました。' : '';
@@ -61,6 +70,7 @@ ${JSON.stringify(scoring, null, 2)}
 このデータを踏まえ、日本語で次を簡潔に述べてください:
 1. 最も配布に適したエリアはどこか、その理由（世帯規模・ターゲット人数・競合密度・配布効率の観点）
    ターゲット人数（target / targetRate / targetPerCopy・targetRanking）がある場合は、ターゲットが多いエリアを必ず挙げること
+   顧客実績（customers / customerPer1000 / customerRanking / customerTotal）がある場合は、既存顧客が多い・浸透しているエリアと、その周辺で伸ばせるエリアに触れること
    所得（income.municipal は実データの平均所得、incomeIndex は町丁目の推計指数で市区町村平均=1.00、incomePref は優先する所得層）がある場合は触れること。所得指数は推計である旨を添え、金額に換算しないこと
 2. 逆に優先度を下げるべきエリアと理由
 3. 予算配分の提案（上位エリアへの傾斜配分の考え方）

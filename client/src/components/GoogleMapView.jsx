@@ -22,7 +22,7 @@ function polygonStyle(p) {
 }
 
 export default function GoogleMapView({
-  apiKey, center, zoom, polygons, points, competitors, circles = [], pin = null, pinLabel = '', barriers = [],
+  apiKey, center, zoom, polygons, points, competitors, customers = [], circles = [], pin = null, pinLabel = '', barriers = [],
   onToggle, onApi, onCircleChange, onPinChange,
 }) {
   const ref = useRef(null);
@@ -33,6 +33,7 @@ export default function GoogleMapView({
   const circlesRef = useRef({}); // id -> google.maps.Circle
   const pinRef = useRef(null);
   const barrierLinesRef = useRef([]);
+  const customerMarkersRef = useRef([]);
   const infoRef = useRef(null);
   const geocoderRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -234,6 +235,24 @@ export default function GoogleMapView({
     }
   }
 
+  // 顧客（町丁目ごとの人数のバブル）
+  function syncCustomers() {
+    const maps = window.google?.maps;
+    if (!maps || !mapRef.current) return;
+    customerMarkersRef.current.forEach((m) => m.setMap(null));
+    customerMarkersRef.current = [];
+    for (const c of customers) {
+      const m = new maps.Marker({
+        map: mapRef.current, position: { lat: c.lat, lng: c.lng }, zIndex: 8, clickable: true,
+        icon: { path: maps.SymbolPath.CIRCLE, scale: c.count >= 0.5 ? 8 + 3 * Math.sqrt(c.count) : 4, fillColor: '#0d9488', fillOpacity: 0.82, strokeColor: '#fff', strokeWeight: 1.5 },
+        label: c.count >= 0.5 ? { text: String(Math.round(c.count)), color: '#fff', fontSize: '11px', fontWeight: '700' } : undefined,
+        title: `${c.name}：顧客 ${c.count}人`,
+      });
+      customerMarkersRef.current.push(m);
+    }
+  }
+
+  useEffect(() => { if (ready) syncCustomers(); /* eslint-disable-next-line */ }, [ready, customers]);
   useEffect(() => { if (ready) syncBarriers(); /* eslint-disable-next-line */ }, [ready, barriers]);
   useEffect(() => { if (ready) syncPolygons(); /* eslint-disable-next-line */ }, [ready, polygons]);
   useEffect(() => { if (ready) syncPin(); /* eslint-disable-next-line */ }, [ready, pin, pinLabel]);

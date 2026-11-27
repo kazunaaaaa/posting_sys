@@ -4,6 +4,7 @@
 //   - 隣接: 境界が接している町丁目どうし（大きな川は水面区画で隔てられるため隣接しない）
 //   - 分断: ピン→町丁目の中心が、川・高速道路・国道・線路をまたぐ数（重み付き）
 //   - ターゲット密度: 町丁目のターゲット比率 ÷ 候補全体の平均
+//   - 顧客実績（顧客データがあるとき）: 優先度 ÷ 顧客密度^0.7（世帯あたり顧客数 ÷ 候補全体の平均）
 //   - 所得層（指定時）: 優先度 ÷ 所得指数^1.5（高め）／ × 所得指数^1.5（低め）
 import { pointInPolygon } from './geo.js';
 import { crossings, indexBarriers, BARRIER_TYPES } from './barriers.js';
@@ -89,7 +90,7 @@ export function buildAdjacency(towns, tolM = 12) {
  * @param {Record<string,{index:number|null}>} [p.income] 町丁目の所得指数（平均=1）
  * @param {'high'|'low'|null} [p.incomePref] 所得層の優先
  */
-export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barriers = [], excludeCodes = [], income = {}, incomePref = null }) {
+export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barriers = [], excludeCodes = [], income = {}, incomePref = null, customers = null }) {
   const target = Math.max(1, Number(targetCopies) || 0);
   const excluded = new Set(excludeCodes);
   const pool = towns
@@ -107,6 +108,14 @@ export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barri
   // ターゲット密度（平均との比）
   const rates = cands.map((t) => targets[t.code]?.rate).filter((r) => r > 0);
   const avgRate = rates.length ? rates.reduce((s, r) => s + r, 0) / rates.length : 0;
+  // 顧客密度（少数は平均に寄せる）
+  let custAvg = 0;
+  const custPrior = 300;
+  if (customers) {
+    const c = cands.reduce((s, t) => s + (customers[t.code] || 0), 0);
+    const h = cands.reduce((s, t) => s + (t.households || 0), 0);
+    custAvg = h ? c / h : 0;
+  }
   const indexed = indexBarriers(barriers);
   for (const t of cands) {
     const c = indexed.length ? crossings(pin, t.center, indexed) : { weight: 0, types: [], names: [] };
@@ -116,7 +125,10 @@ export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barri
     const ix = income[t.code]?.index;
     t.incomeIndex = ix ?? null;
     const fi = ix > 0 && (incomePref === 'high' || incomePref === 'low') ? Math.max(0.5, Math.min(2, incomePref === 'high' ? ix : 1 / ix)) : 1;
-    t.cost = Math.max(0.05, t.d) * (1 + c.weight) / ti ** 0.6 / fi ** 1.5;
+    const ci = custAvg > 0 && t.households
+      ? Math.max(0.4, Math.min(3, (((customers[t.code] || 0) + custAvg * custPrior) / (t.households + custPrior)) / custAvg))
+      : 1;
+    t.cost = Math.max(0.05, t.d) * (1 + c.weight) / ti ** 0.6 / fi ** 1.5 / ci ** 0.7;
   }
 
   const adj = buildAdjacency(cands);
@@ -192,6 +204,7 @@ export function buildOptimalArea({ towns, pin, targetCopies, targets = {}, barri
     targetTotal,
     incomeIndex,
     incomePref: incomePref || null,
+    customersInArea: customers ? +order.reduce((s, t) => s + (customers[t.code] || 0), 0).toFixed(1) : null,
     islands,
     skippedByBarrier,
     crossedBarriers: [...new Set(order.flatMap((t) => t.cross.names.length ? t.cross.names : t.cross.types.map((x) => BARRIER_TYPES[x].label)))],

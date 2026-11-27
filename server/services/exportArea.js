@@ -175,7 +175,7 @@ export async function buildAreaWorkbook(p) {
 export const REPORT_SHEET_NAME = 'AI分析レポート';
 const BLUE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F2' } };
 const SOURCE_LABEL = { census: '国勢調査（町丁目の年齢・男女別人口）', mixed: '国勢調査＋一部は全国の年齢構成で推計', estimate: '全国の年齢構成による推計' };
-const AXIS_LABEL = { reach: '到達（世帯数）', target: 'ターゲット', income: '所得層', opportunity: '競合機会', efficiency: '配布効率', cost: 'コスト' };
+const AXIS_LABEL = { reach: '到達（世帯数）', target: 'ターゲット', income: '所得層', customer: '顧客実績', opportunity: '競合機会', efficiency: '配布効率', cost: 'コスト' };
 const INCOME_PREF_LABEL = { high: '高め', low: '低め' };
 
 const num = (v) => (Number.isFinite(+v) && v !== null && v !== '' ? +v : null);
@@ -187,9 +187,9 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
   });
   ws.columns = [
     { width: 2 }, { width: 6 }, { width: 26 }, { width: 13 }, { width: 13 }, { width: 13 },
-    { width: 13 }, { width: 13 }, { width: 13 }, { width: 13 },
+    { width: 13 }, { width: 13 }, { width: 13 }, { width: 13 }, { width: 13 },
   ];
-  const lastCol = 'J';
+  const lastCol = 'K';
   let r = 1;
   const cell = (addr, value, st = {}) => {
     const c = ws.getCell(addr);
@@ -229,7 +229,7 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
   };
   // 表: cols = [{ header, key, width?(列数), numFmt, align }]
   const table = (cols, rows) => {
-    const letters = 'BCDEFGHIJ';
+    const letters = 'BCDEFGHIJK';
     let ci = 0;
     const spans = cols.map((c) => { const from = letters[ci]; ci += c.span || 1; return { from, to: letters[ci - 1] }; });
     cols.forEach((c, i) => {
@@ -277,6 +277,7 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
   kv('エリア数', scoring?.areas?.length ?? null, '#,##0');
   kv('世帯数 合計', num(totals.households), '#,##0');
   kv('配布部数 合計', num(ctx.totalCopies ?? totals.distribution), '#,##0"部"');
+  if (num(totals.customers) != null && scoring?.customerRanking?.length) kv('顧客（選択エリア内）', `約${Math.round(num(totals.customers)).toLocaleString()}人${num(scoring.customerTotal) ? `（取り込んだ顧客 ${num(scoring.customerTotal).toLocaleString()}人のうち）` : ''}`);
   if (num(totals.target)) kv(`ターゲット（${scoring?.targetProfile?.label || '指定属性'}）`, `約${num(totals.target).toLocaleString()}人（${SOURCE_LABEL[scoring?.targetSource] || '推計'}）`);
   kv('競合店舗数', num(totals.competitors), '#,##0"件"');
   kv('想定配布コスト', num(totals.estimatedCost), '"約"#,##0"円"');
@@ -316,6 +317,16 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
     ], scoring.targetRanking.map((x, i) => ({ ...x, rank: i + 1 })));
   }
 
+  if (scoring?.customerRanking?.length) {
+    heading('■ 顧客が多いエリア（取り込んだ顧客データ）');
+    table([
+      { header: '順位', value: (x) => x.rank, align: 'center' },
+      { header: 'エリア', value: (x) => townLabel(x.name) },
+      { header: '顧客(人)', key: 'customers', numFmt: '#,##0.#' },
+      { header: '1000世帯あたり', key: 'customerPer1000', numFmt: '0.00' },
+    ], scoring.customerRanking.map((x, i) => ({ ...x, rank: i + 1 })));
+  }
+
   if (scoring?.incomeRanking?.length && scoring.income?.estimated) {
     heading(`■ 所得指数が${scoring.incomePref === 'low' ? '低い' : '高い'}エリア（推計・市区町村平均 = 1.00）`);
     table([
@@ -340,6 +351,7 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
       { header: '配布部数', key: 'distribution', numFmt: '#,##0' },
       { header: '競合(件)', key: 'competitorCount', numFmt: '0' },
       ...(hasTarget ? [{ header: 'ターゲット(人)', key: 'target', numFmt: '#,##0' }] : []),
+      ...(scoring.areas.some((a) => a.customers > 0) ? [{ header: '顧客(人)', key: 'customers', numFmt: '#,##0.#' }] : []),
       ...(hasIncome ? [{ header: '所得指数', value: (x) => (x.incomeIndex != null ? `${x.incomeIndex.toFixed(2)} ${x.incomeLevel}` : null), align: 'center' }] : []),
       { header: '想定コスト(円)', key: 'estimatedCost', numFmt: '#,##0' },
     ], scoring.areas.map((x, i) => ({ ...x, rank: i + 1 })));

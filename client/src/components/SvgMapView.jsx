@@ -10,7 +10,7 @@ function scoreColor(score) {
 }
 
 export default function SvgMapView({
-  polygons, points, competitors, circles = [], pin = null, pinLabel = '', barriers = [], businessIcon, onToggle, onApi, emptyHint,
+  polygons, points, competitors, customers = [], circles = [], pin = null, pinLabel = '', barriers = [], businessIcon, onToggle, onApi, emptyHint,
 }) {
   const [hover, setHover] = useState(null);
   const W = 900, H = 640, pad = 44;
@@ -107,6 +107,17 @@ export default function SvgMapView({
           return (
             <circle key={'cir-' + c.id} cx={s.x} cy={s.y} r={Math.max(4, c.radiusKm * 1000 * mToPx)}
               fill={COLORS.circle} fillOpacity="0.04" stroke={COLORS.circle} strokeWidth="2.5" pointerEvents="none" />
+          );
+        })}
+        {/* 顧客（町丁目ごとの人数） */}
+        {customers.map((c) => {
+          const s = project(c.lng, c.lat);
+          const r = c.count >= 0.5 ? 7 + 3 * Math.sqrt(c.count) : 4;
+          return (
+            <g key={'cus-' + c.code} pointerEvents="none">
+              <circle cx={s.x} cy={s.y} r={r} fill="#0d9488" fillOpacity="0.8" stroke="#fff" strokeWidth="1.5" />
+              <text x={s.x} y={s.y + 4} textAnchor="middle" fontSize="11" fontWeight="700" fill="#fff">{c.count >= 0.5 ? Math.round(c.count) : ''}</text>
+            </g>
           );
         })}
         {competitors.map((c) => {

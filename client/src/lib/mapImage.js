@@ -129,7 +129,7 @@ async function drawBaseMap(ctx, cx, cy, zf) {
  * @param {string} [p.pinLabel] 店名など
  * @param {(name:string)=>string} [p.labelOf]
  */
-export async function buildMapImage({ areas, circles = [], pin = null, pinLabel = '', labelOf = townLabel, competitors = [], competitorLabel = '競合' }) {
+export async function buildMapImage({ areas, circles = [], pin = null, pinLabel = '', labelOf = townLabel, competitors = [], competitorLabel = '競合', customers = [] }) {
   // 表示範囲は選択エリア（とピン）に合わせる。円は範囲外にはみ出してもよい（エリアをできるだけ大きく写す）
   const pts = [];
   for (const a of areas) for (const ring of a.rings) for (const [lng, lat] of ring) pts.push({ lat, lng });
@@ -213,6 +213,20 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
     compShown++;
   }
 
+  // 顧客（町丁目ごとの人数のバブル）
+  let custShown = 0;
+  for (const c of customers) {
+    const p = project(c.lat, c.lng);
+    if (p.x < 0 || p.y < 0 || p.x > canvas.width || p.y > MH * SCALE) continue;
+    const r = (c.count >= 0.5 ? 7 + 3 * Math.sqrt(c.count) : 4) * SCALE;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(13,148,136,0.85)'; ctx.fill();
+    ctx.lineWidth = 1.5 * SCALE; ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.font = `bold ${11 * SCALE}px ${FONT}`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (c.count >= 0.5) ctx.fillText(String(Math.round(c.count)), p.x, p.y + 0.5 * SCALE);
+    custShown += c.count;
+  }
+
   // 半径ラベルは町名より手前に
   for (const l of circleLabels) drawLabel(ctx, l.text, l.x, l.y, { size: 11, border: '#ef1c1c', color: '#b91c1c' });
 
@@ -229,6 +243,7 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
   const legend = [{ type: 'area', text: '配布エリア' }];
   if (circles.length) legend.push({ type: 'circle', text: '半径' });
   if (compShown) legend.push({ type: 'comp', text: `${competitorLabel}（${compShown}件）` });
+  if (custShown) legend.push({ type: 'cust', text: `顧客（${Math.round(custShown)}人）` });
   if (pin && pinLabel) legend.push({ type: 'pin', text: pinLabel });
   drawLegendBar(ctx, legend, baseMap ? '' : '背景地図なし（Maps Static API を確認）');
 
@@ -260,6 +275,9 @@ function drawLegendBar(ctx, items, note) {
     } else if (it.type === 'comp') {
       ctx.beginPath(); ctx.arc(x + icon / 2, cy, 5 * SCALE, 0, Math.PI * 2);
       ctx.fillStyle = '#7c3aed'; ctx.fill(); ctx.lineWidth = 1 * SCALE; ctx.strokeStyle = '#fff'; ctx.stroke();
+    } else if (it.type === 'cust') {
+      ctx.beginPath(); ctx.arc(x + icon / 2, cy, 6 * SCALE, 0, Math.PI * 2);
+      ctx.fillStyle = '#0d9488'; ctx.fill(); ctx.lineWidth = 1 * SCALE; ctx.strokeStyle = '#fff'; ctx.stroke();
     } else if (it.type === 'pin') {
       ctx.save(); ctx.translate(x + icon / 2, cy + 7 * SCALE); ctx.scale(0.55, 0.55); drawPin(ctx, 0, 0); ctx.restore();
     }

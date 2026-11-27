@@ -13,7 +13,7 @@ const router = Router();
 // 最適エリア分析: { codes, level, businessTypeId, unitCost?, competitors?, profile?:{ageMin,ageMax,sex,label}, incomePref?:'high'|'low' }
 router.post('/', async (req, res) => {
   try {
-    const { codes = [], level = 'municipality', businessTypeId, unitCost, competitors: passed, profile, incomePref, coverRate } = req.body ?? {};
+    const { codes = [], level = 'municipality', businessTypeId, unitCost, competitors: passed, profile, incomePref, coverRate, customers, customerTotal } = req.body ?? {};
     const rate = normalizeRate(coverRate);
     if (!codes.length) return res.status(400).json({ error: 'codes is required' });
 
@@ -47,7 +47,9 @@ router.post('/', async (req, res) => {
       unitCost, rateMap,
       targets: tg?.byCode, targetProfile: tg?.profile, targetSource: tg?.source,
       income: inc?.byCode, incomePref,
+      customers: customers && typeof customers === 'object' ? customers : null,
     });
+    if (customers) scoring.customerTotal = Number(customerTotal) || null; // 取り込んだ顧客の総数（エリア外を含む）
     const cityName = Object.fromEntries(areas.map((a) => [a.cityCode || String(a.code).slice(0, 5), a.city]));
     scoring.income = {
       municipal: Object.entries(inc?.municipal || {}).filter(([, v]) => v).map(([code, v]) => ({ code, city: cityName[code] || code, ...v })),

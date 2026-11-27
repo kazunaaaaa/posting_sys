@@ -18,7 +18,7 @@ function distKm(a, b) {
 // POST /api/optimize/area { pin:{lat,lng}, targetCopies, cityCodes:[...], businessTypeId?, profile?, excludeCodes? }
 router.post('/area', async (req, res) => {
   try {
-    const { pin, targetCopies, cityCodes = [], businessTypeId, profile, excludeCodes = [], incomePref = null, coverRate } = req.body ?? {};
+    const { pin, targetCopies, cityCodes = [], businessTypeId, profile, excludeCodes = [], incomePref = null, coverRate, customers = null } = req.body ?? {};
     if (!pin || !Number.isFinite(+pin.lat) || !Number.isFinite(+pin.lng)) return res.status(400).json({ error: 'pin が必要です' });
     if (!(+targetCopies > 0)) return res.status(400).json({ error: 'targetCopies が必要です' });
     if (!cityCodes.length) return res.status(400).json({ error: '町丁目を読み込んだ市区町村がありません' });
@@ -59,6 +59,7 @@ router.post('/area', async (req, res) => {
     const result = buildOptimalArea({
       towns: near, pin: p, targetCopies: +targetCopies, targets: tg.byCode, barriers, excludeCodes,
       income: inc?.byCode || {}, incomePref: inc ? incomePref : null,
+      customers: customers && typeof customers === 'object' ? customers : null,
     });
 
     // 地図表示用: 作成エリア周辺の分断線だけ返す

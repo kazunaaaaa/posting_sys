@@ -203,3 +203,12 @@ body {
 .warnbox ul { margin: 4px 0 4px 16px; padding: 0; }
 .chip.redline { background: #fff; color: #ef1c1c; border-color: #ef1c1c; }
 .chip.redline:hover { background: #fef2f2; }
+.filebtn { display: block; text-align: center; cursor: pointer; }
+.custpanel { margin-top: 8px; font-size: 13px; }
+.custsum { margin-bottom: 6px; }
+.custsum b { font-size: 16px; color: #0d9488; }
+.custsum span { font-size: 11px; color: var(--muted); }
+.custrow { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; padding: 6px 8px; margin: 6px 0; line-height: 1.7; }
+.custrow b { color: #0f766e; }
+.custrow .chip { margin-left: 6px; }
+.warnbox summary { cursor: pointer; font-weight: 600; }

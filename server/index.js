@@ -12,13 +12,14 @@ import staticmapRouter from './routes/staticmap.js';
 import exportRouter from './routes/export.js';
 import optimizeRouter from './routes/optimize.js';
 import importRouter from './routes/importTable.js';
+import customersRouter from './routes/customers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
 const jsonParser = express.json({ limit: '2mb' });
 // 配布部数表の出力は地図画像を含むため、専用ルート側で大きめの上限を設定する
-app.use((req, res, next) => (req.path.startsWith('/api/export') ? next() : jsonParser(req, res, next)));
+app.use((req, res, next) => ((req.path.startsWith('/api/export') || req.path.startsWith('/api/customers')) ? next() : jsonParser(req, res, next)));
 
 // フロントに公開してよい設定（Maps用キーなど）
 app.get('/api/config', (req, res) => {
@@ -41,6 +42,7 @@ app.use('/api/staticmap', staticmapRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/optimize', optimizeRouter);
 app.use('/api/import', importRouter);
+app.use('/api/customers', customersRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
