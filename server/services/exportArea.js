@@ -370,16 +370,6 @@ export function addReportSheet(wb, report = {}, ctx = {}) {
     ], scoring.areas.map((x, i) => ({ ...x, rank: i + 1 })));
   }
 
-  const companies = report.analysis?.quotes?.companyTotals || [];
-  if (companies.length) {
-    heading('■ 配布会社の見積（登録単価による概算）');
-    table([
-      { header: '会社', key: 'name', span: 2 },
-      { header: '対応エリア数', key: 'areas', numFmt: '#,##0' },
-      { header: '見積金額(円)', key: 'quote', numFmt: '#,##0' },
-    ], companies);
-  }
-
   heading('■ データの出典・注意');
   const notes = [
     '世帯数: 国勢調査（e-Stat）の町丁目・字別 世帯数。配布部数は世帯数×カバー率（10部未満切り捨て）。',
@@ -431,11 +421,17 @@ export function addCustomerReportSheet(wb, cr = {}, ctx = {}) {
       `エリア内の顧客は約${fix1(area.customers)}人${share != null ? `（顧客全体の${Math.round(share * 100)}%）` : ''}、1000世帯あたり${area.per1000}人` +
       `${ratio ? `（顧客のいる町丁目全体の${ratio.toFixed(1)}倍）` : ''}です。`);
   }
-  const cands = (cr.candidates || []).slice(0, 5);
+  const rv = cr.review || null;
+  if (rv?.diff?.summary) lines.push(`前回エリアからの見直し: ${rv.diff.summary}（町丁目ごとの根拠は下の「配布エリアの見直し」）`);
+  else if (rv?.suggestion?.summary) lines.push(`前回エリアの見直し案: ${rv.suggestion.summary}`);
+  const cands = rv ? [] : (cr.candidates || []).slice(0, 5);
   if (cands.length) lines.push(`追加候補（エリア外で顧客が多い）: ${cands.map((t) => `${townLabel(t.name)}（${fix1(t.customers)}人）`).join('、')}。部数に余裕があれば追加を検討してください。`);
   para(lines.map((l) => `・${l}`).join('\n'));
 
   // ---- 顧客データ ----
+  // ---- 傾向・見直しの根拠（前回の配布エリアを比較元にした分析） ----
+  if (rv) addReviewSections({ heading, para, table, kv }, rv, { name, fix1 });
+
   heading('■ 取り込んだ顧客データ');
   kv('顧客数', sm.total != null ? `${sm.total.toLocaleString()}人${sm.excluded ? `（退会者 ${sm.excluded}人を除く）` : ''}` : null);
   kv('町丁目に対応', sm.matched != null ? `${sm.matched.toLocaleString()}人（丁目まで ${sm.chome ?? '—'}人・町名まで ${sm.town ?? '—'}人）` : null);
@@ -525,6 +521,103 @@ export function addCustomerReportSheet(wb, cr = {}, ctx = {}) {
   ].join('\n'), { color: 'FF595959' });
 
   return finish();
+}
+
+
+// 顧客分析レポートの「傾向」「配布エリアの見直し（削除・追加の根拠）」
+// rv: services/customerReview.js reviewArea() の結果
+function addReviewSections({ heading, para, table, kv }, rv, { name, fix1 }) {
+  const tr = rv.trends || {};
+  heading('■ 顧客分布の傾向');
+  if (tr.bullets?.length) para(tr.bullets.map((b) => `・${b}`).join('\n'));
+  if (tr.sectors?.length) {
+    heading(`■ 方位別の浸透度（店舗から${rv.radiusKm}km以内・1000世帯あたりの顧客数）`);
+    table([
+      { header: '方位', key: 'dir', align: 'center' },
+      { header: '世帯数', key: 'households', numFmt: '#,##0' },
+      { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+      { header: '1000世帯あたり', key: 'per1000', numFmt: '0.00' },
+      { header: 'うち前回エリア 世帯', key: 'baseHouseholds', numFmt: '#,##0' },
+      { header: '前回エリア 顧客(人)', value: (x) => fix1(x.baseCustomers), numFmt: '#,##0.#' },
+      { header: '前回エリア 1000世帯あたり', key: 'basePer1000', numFmt: '0.00' },
+    ], tr.sectors);
+  }
+  if (tr.distanceBands?.length) {
+    heading('■ 距離帯別の浸透度（1000世帯あたりの顧客数）');
+    table([
+      { header: '距離', key: 'label', span: 2 },
+      { header: '世帯数', key: 'households', numFmt: '#,##0' },
+      { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+      { header: '1000世帯あたり', key: 'per1000', numFmt: '0.00' },
+      { header: 'うち前回エリア 世帯', key: 'baseHouseholds', numFmt: '#,##0' },
+    ], tr.distanceBands);
+  }
+
+  const d = rv.diff;
+  const sg = rv.suggestion || {};
+  const townTable = (rows, { expected = false } = {}) => table([
+    { header: '町丁目', value: name, span: 2 },
+    { header: '配布部数', key: 'copies', numFmt: '#,##0' },
+    { header: '世帯数', key: 'households', numFmt: '#,##0' },
+    { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+    ...(expected ? [{ header: '平均なら(人)', key: 'expected', numFmt: '0.0' }] : [{ header: '1000世帯あたり', key: 'per1000', numFmt: '0.00' }]),
+    { header: '方位・距離', value: (x) => `${x.dir} ${x.distanceKm}km`, align: 'center' },
+  ], rows);
+  const reasons = (rows) => para(rows.map((t) => `・${name(t)}（${(t.copies || 0).toLocaleString()}部）: ${t.reason}`).join('\n'));
+
+  if (d) {
+    heading('■ 配布エリアの見直し（前回 → 今回）');
+    kv('前回', `${d.before.towns}町丁目・${d.before.copies.toLocaleString()}部・エリア内の顧客 ${fix1(d.before.customers)}人（1000世帯あたり${d.before.per1000}人）`);
+    kv('今回', `${d.after.towns}町丁目・${d.after.copies.toLocaleString()}部・エリア内の顧客 ${fix1(d.after.customers)}人（1000世帯あたり${d.after.per1000}人）`);
+    para(d.summary);
+    if (d.removed.length) {
+      heading(`■ 削除した町丁目と根拠（${d.removed.length}町丁目・${d.removed.reduce((s, t) => s + (t.copies || 0), 0).toLocaleString()}部）`);
+      townTable(d.removed, { expected: true });
+      reasons(d.removed);
+    }
+    if (d.added.length) {
+      heading(`■ 追加した町丁目と根拠（${d.added.length}町丁目・${d.added.reduce((s, t) => s + (t.copies || 0), 0).toLocaleString()}部）`);
+      townTable(d.added);
+      reasons(d.added);
+    }
+  } else {
+    heading('■ 配布エリアの見直し案（前回エリアのまま出力しています）');
+    para(sg.summary || '');
+    if (sg.removed?.length) {
+      heading('■ 削除を提案する町丁目と根拠');
+      townTable(sg.removed, { expected: true });
+      reasons(sg.removed);
+    }
+    if (sg.added?.length) {
+      heading('■ 追加を提案する町丁目と根拠');
+      townTable(sg.added);
+      reasons(sg.added);
+    }
+  }
+  if (sg.keptZero?.length) {
+    heading('■ 顧客0人だが残した町丁目（周辺が濃く、偶然の可能性があるため）');
+    para(sg.keptZero.map((t) => `・${name(t)}: ${t.reason}`).join('\n'));
+  }
+  if (sg.watch?.length) {
+    heading('■ 様子見の町丁目（顧客0人だが、偶然の範囲）');
+    para(sg.watch.map((t) => `・${name(t)}: ${t.reason}`).join('\n'));
+  }
+  if (sg.extraCandidates?.length) {
+    heading('■ その他の追加候補（顧客がいる未配布の町丁目）');
+    table([
+      { header: '町丁目', value: name, span: 2 },
+      { header: '顧客(人)', value: (x) => fix1(x.customers), numFmt: '#,##0.#' },
+      { header: '世帯数', key: 'households', numFmt: '#,##0' },
+      { header: '1000世帯あたり', key: 'per1000', numFmt: '0.00' },
+      { header: '方位・距離', value: (x) => `${x.dir} ${x.distanceKm}km`, align: 'center' },
+    ], sg.extraCandidates);
+  }
+  para([
+    '・浸透度 = 町丁目に住む顧客数 ÷ 世帯数（1000世帯あたり）。「平均なら」は前回エリアの平均の浸透度で世帯数を掛けた期待値です。',
+    '・削除の判断: 顧客0人・平均なら0.8人以上いるはず・隣接する前回エリアを含めた周辺の浸透度も平均の6割未満、の町丁目をまとめ、偶然0人になる確率（ポアソン分布）が10%未満のときだけ削除しています。',
+    '・追加の判断: 未配布なのに顧客がいて、浸透度が前回エリア平均の5割以上、かつ残したエリアに隣接する町丁目を、浸透度の高い順に、削除で浮いた部数の範囲で追加しています。',
+    '・顧客はチラシ以外（紹介・SNSなど）から来た人も含みます。入会経路が分かれば、チラシ経由だけで分析するとより正確です。',
+  ].join('\n'), { color: 'FF595959' });
 }
 
 // exceljs は <xdr:oneCellAnchor> に editAs 属性を付けるが、これは twoCellAnchor 専用で

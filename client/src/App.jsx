@@ -9,6 +9,11 @@ import { DEFAULT_RATE, withRate, rateFromPercent } from './lib/distribution.js';
 import { decodeText, parseCsv, detectColumns, extractCustomers, aggregate, radiusPercentiles, suggestProfile, customerReportData } from './lib/customers.js';
 
 // 「📍から約 N 部を追加」の選択肢
+function distKmClient(a, b) {
+  const kx = Math.cos((((a.lat + b.lat) / 2) * Math.PI) / 180);
+  return Math.hypot((a.lng - b.lng) * kx, a.lat - b.lat) * 111.32;
+}
+
 const COUNT_OPTIONS = [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000, 50000, 100000];
 import GoogleMapView from './components/GoogleMapView.jsx';
 import SvgMapView from './components/SvgMapView.jsx';
@@ -84,7 +89,12 @@ export default function App() {
 
   // 顧客データ（CSV）。ブラウザのメモリ内だけに保持（保存しない）
   const [cust, setCust] = useState(null); // { fileName, list, cols, match, stores }
-  const [custOpts, setCustOpts] = useState({ excludeWithdrawn: true, store: '', show: true, use: true, inExcel: false, reportSheet: true });
+  const [custOpts, setCustOpts] = useState({ excludeWithdrawn: true, store: '', show: true, use: true, inExcel: true });
+  // 前回の配布エリア（比較元）と、顧客データによる見直しの結果
+  const [baseArea, setBaseArea] = useState(null); // { codes, copies, label }
+  const [review, setReview] = useState(null);
+  const [reviewMsg, setReviewMsg] = useState('');
+  const [pasteAsBase, setPasteAsBase] = useState(true); // 貼り付けた表を前回の配布エリアとして記録
   const [custMsg, setCustMsg] = useState('');
 
   // 非同期処理の途中でも最新の町丁目を参照するための参照
@@ -395,7 +405,48 @@ export default function App() {
   }
 
   function clearCustomers() {
-    setCust(null); setCustMsg(''); setAnalysis(null);
+    setCust(null); setCustMsg(''); setAnalysis(null); setReview(null); setReviewMsg('');
+  }
+
+  // ---- 前回の配布エリア（比較元）と、顧客データによる見直し ----
+  function setBaseFromSelection() {
+    if (!selected.length) return;
+    setBaseArea({ codes: [...selected], copies: totalDistribution, label: '記録した選択' });
+    setReview(null); setReviewMsg('');
+  }
+
+  // 傾向・削除/追加の提案・前回との差分の根拠をサーバーで計算（町丁目ごとの人数だけを送る）
+  async function requestReview(baseCodes, currentCodes) {
+    if (!pin || !custAgg?.markers.length || !baseCodes?.length) return null;
+    const households = {};
+    for (const t of townAreasRef.current) if (t.hhSource === 'paste') households[t.code] = t.households;
+    return api.reviewCustomers({
+      pin, cityCodes: townCitiesRef.current.map((c) => c.code), baseCodes, currentCodes,
+      customers: custAgg.byCode, customerTotal: custAgg.matched, coverRate: rate, households,
+    });
+  }
+
+  async function reviewByCustomers() {
+    const base = baseArea?.codes?.length ? baseArea.codes : selected;
+    if (!base.length) { setReviewMsg('先に前回の配布エリアを選ぶか、エリア表を貼り付けてください'); return; }
+    if (!pin) { setReviewMsg('📍（店舗の位置）を立ててください'); return; }
+    if (!baseArea) setBaseArea({ codes: [...base], copies: totalDistribution, label: '見直し前の選択' });
+    setLoading((l) => ({ ...l, review: true }));
+    setReviewMsg('顧客データで前回エリアを見直し中…');
+    try {
+      const r = await requestReview(base, null);
+      if (!r) throw new Error('顧客データがありません');
+      const sg = r.suggestion;
+      if (sg.removed.length || sg.added.length) {
+        setSelected(sg.codes); setOptResult(null); setAnalysis(null);
+      }
+      setReview(r);
+      setReviewMsg(`🔁 ${sg.summary}\n→ ${sg.codes.length}町丁目・${sg.copies.toLocaleString()}部（前回 ${r.base.copies.toLocaleString()}部）／エリア内の顧客 ${r.base.customers}人 → ${sg.customers}人`);
+    } catch (e) {
+      setReviewMsg(`見直しできませんでした: ${e.message}`);
+    } finally {
+      setLoading((l) => ({ ...l, review: false }));
+    }
   }
 
   function applyCustomerProfile() {
@@ -439,6 +490,11 @@ export default function App() {
       if (pasteReplace) {
         setSelected(codes); setCircles([]); setOptResult(null); setBarriers([]);
       } else selectCodes(codes);
+      if (pasteAsBase && codes.length) {
+        const bc = new Map(townAreasRef.current.map((t) => [t.code, t]));
+        setBaseArea({ codes, copies: codes.reduce((s, c) => s + (bc.get(c)?.distribution || 0), 0), label: '貼り付けた表' });
+        setReview(null); setReviewMsg('');
+      }
 
       // 表の上にあった住所に中心地のピンを立てる
       let pinMsg = '';
@@ -590,10 +646,12 @@ export default function App() {
     try {
       const ordered = [...selectedAreas].sort((a, b) => String(a.code).localeCompare(String(b.code)));
       const isTown = mode === 'town';
+      const baseSet = isTown && baseArea ? new Set(baseArea.codes) : null;
       const rows = ordered.map((a) => ({
         city: isTown ? a.city : a.pref,
         town: isTown ? a.name : a.city,
         households: a.households,
+        note: baseSet && !baseSet.has(a.code) ? '追加（前回エリア外）' : undefined,
       }));
       if (rows.some((r) => r.households == null)) throw new Error('世帯数が未取得のエリアがあります（e-Stat接続が必要）');
 
@@ -626,21 +684,40 @@ export default function App() {
           ? { rings: a.polygons ?? [a.polygon], center: a.center, name: a.name }
           : boundaryMap[a.code] && { rings: boundaryMap[a.code].polygons, center: boundaryMap[a.code].center, name: a.city })).filter(Boolean);
         const bt = businessTypes.find((b) => b.id === businessTypeId);
+        // 前回エリアから外した町丁目は灰色で描き、顧客の分布（90%が入る範囲）まで地図を広げる
+        const selSet = new Set(selected);
+        const removedAreas = isTown && baseArea ? baseArea.codes.filter((c) => !selSet.has(c)).map((c) => byCode[c]).filter(Boolean)
+          .map((a) => ({ rings: a.polygons ?? [a.polygon], center: a.center, name: a.name })) : [];
+        const custShown = custOpts.inExcel && custAgg ? custAgg.markers : [];
+        const r90 = custRadius?.[0.9];
+        const fitPoints = pin && r90 ? custShown.filter((m) => distKmClient(pin, m) <= r90) : [];
         map = await buildMapImage({
           areas, circles, pin, pinLabel: storeName, labelOf: isTown ? townLabel : (n) => n,
           competitors: comps, competitorLabel: bt ? `競合：${bt.label}` : '競合',
-          customers: custOpts.inExcel && custAgg ? custAgg.markers : [],
+          customers: custShown, removedAreas, fitPoints,
         });
       } catch (e) {
         console.warn('map image failed', e);
       }
 
       setExportMsg('Excelを作成中…');
-      // 顧客分析レポート（別シート）: 顧客データを読み込んでいるとき（町丁目・距離・年齢層ごとの集計だけ）
-      const customerReport = isTown && custOpts.reportSheet && custAgg?.markers.length ? customerReportData({
-        cust, custList, custAgg, custOpts, custRadius, custProfile, pin, selectedAreas, optResult,
-        centerLabel: pin ? `${storeName ? storeName + '　' : ''}緯度 ${pin.lat.toFixed(5)} / 経度 ${pin.lng.toFixed(5)}` : storeName,
-      }) : null;
+      // 顧客分析レポート（別シート）: 顧客データを読み込んでいるときは必ず付ける（町丁目・距離・年齢層ごとの集計だけ）
+      //   傾向と、前回の配布エリアからの削除・追加の根拠（前回エリアが無ければ、今の選択を比較元にした見直し案）
+      let customerReport = null;
+      if (isTown && custAgg?.markers.length) {
+        let rv = null;
+        if (pin) {
+          setExportMsg('顧客分布の傾向・削除/追加の根拠を計算中…');
+          try { rv = await requestReview(baseArea?.codes?.length ? baseArea.codes : selected, selected); } catch (e) { console.warn('review failed', e); }
+        }
+        customerReport = {
+          ...customerReportData({
+            cust, custList, custAgg, custOpts, custRadius, custProfile, pin, selectedAreas, optResult,
+            centerLabel: pin ? `${storeName ? storeName + '　' : ''}緯度 ${pin.lat.toFixed(5)} / 経度 ${pin.lng.toFixed(5)}` : storeName,
+          }),
+          review: rv,
+        };
+      }
 
       const { blob, filename } = await api.exportAreaXlsx({
         report,
@@ -802,6 +879,7 @@ export default function App() {
                   <textarea className="pastebox" rows={7} value={pasteText} onChange={(e) => setPasteText(e.target.value)}
                     placeholder={'Excelで「都道府県・市区町村・町丁目名・世帯数・配布予定数」の範囲を選んでコピーし、ここに貼り付け\n例）\n坂戸市北峰183-2\n都道府県\t市区町村\t町丁目名\t一般世帯数\t配布予定数\n埼玉県\t坂戸市\t日の出町\t1137\t790'} />
                   <label className="checkline"><input type="checkbox" checked={pasteReplace} onChange={(e) => setPasteReplace(e.target.checked)} />今の選択を置き換える（外すと追加）</label>
+                  <label className="checkline"><input type="checkbox" checked={pasteAsBase} onChange={(e) => setPasteAsBase(e.target.checked)} />この表を「前回の配布エリア」として記録（顧客データでの見直し・レポートの比較元）</label>
                   <label className="checkline"><input type="checkbox" checked={pasteUseHh} onChange={(e) => setPasteUseHh(e.target.checked)} />貼り付けた世帯数を使う（外すと国勢調査の世帯数）</label>
                   <div className="pastebtns">
                     <button className="btn primary" disabled={!pasteText.trim() || loading.import} onClick={importAreaTable}>
@@ -880,6 +958,32 @@ export default function App() {
                     </table>
                   )}
                   <div className="hint">「🤖 AIで最適エリアを作成」「AIで最適エリアを分析」は、顧客が多い町丁目（世帯あたり）とその周辺を優先します。</div>
+                  <div className="custbase">
+                    <div className="custrow"><b>前回の配布エリア（比較元）</b>：{baseArea
+                      ? <>{baseArea.codes.length}町丁目・{baseArea.copies.toLocaleString()}部（{baseArea.label}）<button className="chip" onClick={() => { setBaseArea(null); setReview(null); setReviewMsg(''); }}>解除</button></>
+                      : '未設定'}
+                      {selected.length > 0 && <button className="chip" onClick={setBaseFromSelection}>今の選択を記録</button>}</div>
+                    <button className="btn primary" disabled={loading.review || (!baseArea && !selected.length)} onClick={reviewByCustomers}>
+                      {loading.review ? '見直し中…' : '🔁 顧客データで前回エリアを見直す（部数はほぼ同じ）'}
+                    </button>
+                    <div className="hint">顧客0人で周辺も薄い町丁目を外し、未配布なのに顧客がいる隣接の町丁目を追加します。根拠はExcelの「顧客分析レポート」に載ります。</div>
+                    {reviewMsg && <div className="hint" style={{ whiteSpace: 'pre-wrap', color: '#1f2937' }}>{reviewMsg}</div>}
+                    {review?.trends?.bullets?.length > 0 && (
+                      <details className="warnbox" open>
+                        <summary>顧客分布の傾向</summary>
+                        <ul>{review.trends.bullets.map((b, k) => <li key={k}>{b}</li>)}</ul>
+                      </details>
+                    )}
+                    {review && (review.suggestion.removed.length > 0 || review.suggestion.added.length > 0) && (
+                      <details className="warnbox">
+                        <summary>削除 {review.suggestion.removed.length}・追加 {review.suggestion.added.length} の根拠</summary>
+                        <ul>
+                          {review.suggestion.removed.map((t) => <li key={t.code}>➖ {townLabel(t.name)}（{t.copies.toLocaleString()}部）: {t.reason}</li>)}
+                          {review.suggestion.added.map((t) => <li key={t.code}>➕ {townLabel(t.name)}（{t.copies.toLocaleString()}部）: {t.reason}</li>)}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
                   <button className="btn ghost" onClick={clearCustomers}>顧客データを消す</button>
                 </div>
               )}
@@ -1124,7 +1228,7 @@ export default function App() {
                 onChange={(e) => setTitleCopies(e.target.value)} />
             </Field>
             {custAgg?.markers.length > 0 && (
-              <label className="checkline"><input type="checkbox" checked={custOpts.reportSheet} onChange={(e) => setCustOpts((o) => ({ ...o, reportSheet: e.target.checked }))} />顧客分析レポート（別シート）を付ける</label>
+              <div className="hint">顧客データがあるときは、シート「顧客分析レポート」（傾向・前回エリアからの削除/追加の根拠）を必ず付けます。</div>
             )}
             {custAgg?.markers.length > 0 && (
               <label className="checkline"><input type="checkbox" checked={custOpts.inExcel} onChange={(e) => setCustOpts((o) => ({ ...o, inExcel: e.target.checked }))} />地図に顧客の分布（町丁目ごとの人数）を入れる</label>

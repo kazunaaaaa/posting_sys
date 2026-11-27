@@ -129,7 +129,8 @@ async function drawBaseMap(ctx, cx, cy, zf) {
  * @param {string} [p.pinLabel] 店名など
  * @param {(name:string)=>string} [p.labelOf]
  */
-export async function buildMapImage({ areas, circles = [], pin = null, pinLabel = '', labelOf = townLabel, competitors = [], competitorLabel = '競合', customers = [] }) {
+export async function buildMapImage({ areas, circles = [], pin = null, pinLabel = '', labelOf = townLabel, competitors = [], competitorLabel = '競合', customers = [], removedAreas = [], fitPoints = [] }) {
+  // removedAreas: 前回配布して今回外した町丁目（灰色の破線）。fitPoints: 表示範囲に含めたい点（顧客の分布など）
   // 表示範囲は選択エリア（とピン）に合わせる。円は範囲外にはみ出してもよい（エリアをできるだけ大きく写す）
   const pts = [];
   for (const a of areas) for (const ring of a.rings) for (const [lng, lat] of ring) pts.push({ lat, lng });
@@ -139,6 +140,8 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
       pts.push({ lat: c.lat + dLat, lng: c.lng + dLng }, { lat: c.lat - dLat, lng: c.lng - dLng });
     }
   }
+  for (const a of removedAreas) for (const ring of a.rings) for (const [lng, lat] of ring) pts.push({ lat, lng });
+  for (const p of fitPoints) if (Number.isFinite(p?.lat) && Number.isFinite(p?.lng)) pts.push(p);
   if (pin) pts.push(pin);
   if (!pts.length) throw new Error('地図に描くエリアがありません');
 
@@ -165,6 +168,17 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
   // 地図部分の外（凡例帯）には描かない
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, canvas.width, MH * SCALE); ctx.clip();
+
+  // 外した町丁目（灰色・破線）
+  for (const a of removedAreas) {
+    ctx.beginPath();
+    for (const ring of a.rings) {
+      ring.forEach(([lng, lat], i) => { const p = project(lat, lng); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+      ctx.closePath();
+    }
+    ctx.fillStyle = 'rgba(100,100,100,0.32)'; ctx.fill('evenodd');
+    ctx.setLineDash([5 * SCALE, 4 * SCALE]); ctx.lineWidth = 1.4 * SCALE; ctx.strokeStyle = '#444'; ctx.stroke(); ctx.setLineDash([]);
+  }
 
   // 選択エリア（塗り＋境界）
   for (const a of areas) {
@@ -199,6 +213,12 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
     const text = labelOf(a.name);
     const p = project(a.center.lat, a.center.lng);
     drawLabel(ctx, text, p.x, p.y, { size: fitFontSize(ctx, text, (maxX - minX) * 0.95) });
+  }
+
+  for (const a of removedAreas) {
+    if (!a.center) continue;
+    const p = project(a.center.lat, a.center.lng);
+    drawLabel(ctx, `${labelOf(a.name)} 除外`, p.x, p.y, { size: 9, bg: '#eeeeee', border: '#666', color: '#333' });
   }
 
   // 競合店舗（紫の点）。地図の範囲に入るものだけ描く（範囲は選択エリアに合わせたまま）
@@ -241,6 +261,7 @@ export async function buildMapImage({ areas, circles = [], pin = null, pinLabel 
 
   // 凡例（下端の帯。地図に重ならない）
   const legend = [{ type: 'area', text: '配布エリア' }];
+  if (removedAreas.length) legend.push({ type: 'removed', text: `前回から除外（${removedAreas.length}）` });
   if (circles.length) legend.push({ type: 'circle', text: '半径' });
   if (compShown) legend.push({ type: 'comp', text: `${competitorLabel}（${compShown}件）` });
   if (custShown) legend.push({ type: 'cust', text: `顧客（${Math.round(custShown)}人）` });
@@ -269,6 +290,9 @@ function drawLegendBar(ctx, items, note) {
     if (it.type === 'area') {
       ctx.fillStyle = 'rgba(249,115,22,0.5)'; ctx.fillRect(x, cy - 5 * SCALE, icon, 10 * SCALE);
       ctx.lineWidth = 1 * SCALE; ctx.strokeStyle = '#7c2d12'; ctx.strokeRect(x, cy - 5 * SCALE, icon, 10 * SCALE);
+    } else if (it.type === 'removed') {
+      ctx.fillStyle = 'rgba(100,100,100,0.4)'; ctx.fillRect(x, cy - 5 * SCALE, icon, 10 * SCALE);
+      ctx.setLineDash([3 * SCALE, 2 * SCALE]); ctx.lineWidth = 1 * SCALE; ctx.strokeStyle = '#444'; ctx.strokeRect(x, cy - 5 * SCALE, icon, 10 * SCALE); ctx.setLineDash([]);
     } else if (it.type === 'circle') {
       ctx.beginPath(); ctx.arc(x + icon / 2, cy, 6 * SCALE, 0, Math.PI * 2);
       ctx.lineWidth = 2.5 * SCALE; ctx.strokeStyle = '#ef1c1c'; ctx.stroke();

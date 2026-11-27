@@ -37,6 +37,8 @@ export const api = {
     post('/analyze', { codes, level, businessTypeId, competitors, unitCost, profile, incomePref: incomePref || null, coverRate, ...extra }),
   // 顧客の住所 → 町丁目（住所だけを送る）
   matchCustomers: (rows) => post('/customers/match', { rows }),
+  // 顧客データで配布エリアを見直す（傾向・削除/追加の提案・前回との差分の根拠）
+  reviewCustomers: (payload) => post('/customers/review', payload),
   // AI最適エリアの作成（ターゲット・川や道路の分断を考慮）
   optimizeArea: (payload) => post('/optimize/area', payload),
   importAreaTable: (text) => post('/import/area-table', { text }),

@@ -172,9 +172,10 @@ const zip = new AdmZip(out.buffer);
 const wbXml = zip.readAsText('xl/workbook.xml');
 check('エリア表が1枚目・レポートが2枚目', /<sheet [^>]*name="3500部エリア"[^>]*\/>\s*<sheet [^>]*name="AI分析レポート"/.test(wbXml), wbXml.match(/<sheets>.*<\/sheets>/s)?.[0]);
 const ss = zip.readAsText('xl/sharedStrings.xml');
-for (const s of ['■ 分析条件', '高めを優先', '■ AIによる分析（ルールベース）', '【所得】平均所得 約360万円', '■ 所得指数が高いエリア', '■ エリア別スコア', '■ 配布会社の見積', '大和市 約360万円（2022年）', '所得指数（推計）']) {
+for (const s of ['■ 分析条件', '高めを優先', '■ AIによる分析（ルールベース）', '【所得】平均所得 約360万円', '■ 所得指数が高いエリア', '■ エリア別スコア', '大和市 約360万円（2022年）', '所得指数（推計）']) {
   check(`レポートに「${s}」`, ss.includes(s));
 }
+check('配布会社の見積はレポートに載せない', !ss.includes('■ 配布会社の見積'));
 const noRep = await buildAreaWorkbook({ rows: [{ city: '大和市', town: '町1', households: 100 }] });
 check('report なしならシートは1枚', noRep.reportSheetName === null && !new AdmZip(noRep.buffer).readAsText('xl/workbook.xml').includes('AI分析レポート'));
 
